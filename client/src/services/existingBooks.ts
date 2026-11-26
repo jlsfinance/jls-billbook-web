@@ -6,8 +6,8 @@ const RECORDS = ['customers', 'products', 'invoices', 'purchases', 'payments', '
 export const EXISTING_BOOKS_ID = 'default';
 
 export async function hasBookRecords(userId: string, companyId?: string) {
-  const path = companyId ? ['users', userId, 'companies', companyId] : ['users', userId];
-  const results = await Promise.allSettled(RECORDS.map(name => getDocs(query(collection(db, ...path, name), limit(1)))));
+  const path = companyId ? [userId, 'companies', companyId] : [userId];
+  const results = await Promise.allSettled(RECORDS.map(name => getDocs(query(collection(db, 'users', ...path, name), limit(1)))));
   if (results.some(result => result.status === 'fulfilled' && !result.value.empty)) return true;
   return results.every(result => result.status === 'fulfilled') ? false : undefined;
 }
