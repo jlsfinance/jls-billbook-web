@@ -119,7 +119,11 @@ export default function PartyDateRange({ value, onChange }: {
           modifiersClassNames={{ otherDate: 'rounded-md bg-primary/15', inRange: 'bg-primary/5' }}
           hideNavigation showOutsideDays={false}
           className="w-full p-0 [--cell-size:2rem]"
-          classNames={{ month_caption: 'sr-only', month: 'gap-1', week: 'mt-0' }} />
+          classNames={{
+            month_caption: 'sr-only', month: 'gap-1', month_grid: 'w-full table-fixed border-collapse',
+            weekdays: 'table-row', weekday: 'w-[14.2857%]', week: 'table-row',
+            day: 'h-auto w-auto min-w-0 aspect-auto', day_button: 'h-9 w-full min-w-0 aspect-auto',
+          }} />
       </div>
       <p aria-live="polite" className="sr-only">{endpoint === 'from' ? 'Choose a start date' : 'Choose an end date'}</p>
       <div className="flex justify-end gap-2">
