@@ -74,6 +74,7 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
   const [notFound, setNotFound] = useState<string | null>(null);
   const [archivedHit, setArchivedHit] = useState<Product | null>(null);
   const [newProduct, setNewProduct] = useState<NewProductDraft | null>(null);
+  const [savingProduct, setSavingProduct] = useState(false);
 
   const [supplier, setSupplier] = useState('');
   const [supplierInvoice, setSupplierInvoice] = useState('');
@@ -167,8 +168,8 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
     }));
   };
 
-  const createProductFromScan = () => {
-    if (!newProduct) return;
+  const createProductFromScan = async () => {
+    if (!newProduct || savingProduct) return;
     const name = newProduct.name.trim();
     const price = Number(newProduct.price);
     if (!name || !Number.isFinite(price)) {
@@ -199,7 +200,16 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
       barcodeEnabled: true,
     };
 
-    StorageService.saveProduct(product);
+    setSavingProduct(true);
+    setStatusMsg(null);
+    try {
+      await StorageService.saveProductConfirmed(product);
+    } catch (error) {
+      setStatusMsg({ kind: 'err', text: error instanceof Error ? error.message : 'Item save failed. Try again.' });
+      return;
+    } finally {
+      setSavingProduct(false);
+    }
 
     // Opening quantity is recorded as OPENING_STOCK so the ledger explains the first units.
     if (qty > 0) {
@@ -547,12 +557,16 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
 
             <div className="flex gap-3">
               <button
+                type="button"
+                disabled={savingProduct}
                 onClick={createProductFromScan}
                 className="flex-1 py-4 rounded-full bg-primary text-white font-black text-xs uppercase tracking-widest"
               >
-                Save &amp; continue scanning
+                {savingProduct ? 'Saving item…' : 'Save & continue scanning'}
               </button>
               <button
+                type="button"
+                disabled={savingProduct}
                 onClick={() => setNewProduct(null)}
                 className="px-6 py-4 rounded-full bg-surface-container-high font-black text-xs uppercase tracking-widest"
               >

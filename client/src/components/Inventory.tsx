@@ -50,6 +50,7 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
   const [originalId, setOriginalId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [drawerProduct, setDrawerProduct] = useState<Product | null>(null);
+  const [savingItem, setSavingItem] = useState(false);
   const [formMsg, setFormMsg] = useState<{ kind: 'ok' | 'err' | 'warn'; text: string } | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -105,8 +106,9 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
     setIsAdding(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingItem) return;
     const name = (draft.name || '').trim();
     const price = Number(draft.price);
     if (!name) {
@@ -137,11 +139,13 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
     const isNew = !originalId;
     const openingStock = Number(draft.openingStock) || 0;
 
+    const existing = originalId ? StorageService.getProducts().find(item => item.id === originalId) : undefined;
     const product: Product = {
+      ...existing,
       id: finalId,
       name,
       price,
-      stock: isNew ? 0 : Number(draft.stock) || 0, // stock is ledger-driven after creation
+      stock: isNew ? 0 : Number(existing?.stock ?? draft.stock) || 0, // stock is ledger-driven after creation
       category: (draft.category || 'General').trim() || 'General',
       purchasePrice: draft.purchasePrice !== undefined && draft.purchasePrice !== null && draft.purchasePrice !== ('' as unknown as number)
         ? Number(draft.purchasePrice)
@@ -166,7 +170,16 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
       barcodeEnabled: draft.barcodeEnabled !== false,
     };
 
-    StorageService.saveProduct(product);
+    setSavingItem(true);
+    setFormMsg(null);
+    try {
+      await StorageService.saveProductConfirmed(product);
+    } catch (error) {
+      setFormMsg({ kind: 'err', text: error instanceof Error ? error.message : 'Item save failed. Try again.' });
+      return;
+    } finally {
+      setSavingItem(false);
+    }
 
     // Opening stock goes through the ledger, never a silent field write.
     if (isNew && openingStock > 0) {
@@ -394,7 +407,7 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setIsAdding(false)}
+              onClick={() => { if (!savingItem) setIsAdding(false); }}
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             />
             <motion.div
@@ -413,7 +426,7 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
                   </p>
                 </div>
                 <button
-                  onClick={() => setIsAdding(false)}
+                  onClick={() => { if (!savingItem) setIsAdding(false); }}
                   className="w-12 h-12 bg-surface-container-high rounded-full flex items-center justify-center text-foreground"
                   aria-label="Close"
                 >
@@ -432,7 +445,7 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
                       setFormMsg({ kind: 'err', text: `Ye barcode pehle se ${clash.name} ke saath linked hai.` });
                       return 'rejected';
                     }
-                    setDraft(d => ({ ...d, barcode: code }));
+                    setDraft(d => ({ ...d, barcode: code, barcodeEnabled: true }));
                     setFormMsg({ kind: 'ok', text: 'Barcode set ho gaya. Save karke link kar dein.' });
                     return 'added';
                   }}
@@ -447,8 +460,9 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
                   </label>
                   <input
                     value={draft.barcode || ''}
-                    onChange={e => setDraft({ ...draft, barcode: e.target.value })}
-                    placeholder="Bina scanner ke manually type karein (leading zero safe rehta hai)"
+                    onChange={e => setDraft({ ...draft, barcode: e.target.value, barcodeEnabled: true })}
+                    aria-label="Barcode value"
+                    placeholder="Enter barcode"
                     className="w-full p-4 bg-surface-container-high border-2 border-transparent focus:border-google-blue/30 rounded-[24px] font-mono font-bold text-foreground outline-none"
                   />
                   {draft.barcode && (
@@ -461,6 +475,7 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
 
                 {formMsg && (
                   <div
+                    role={formMsg.kind === 'err' ? 'alert' : 'status'}
                     className={`rounded-2xl px-4 py-3 text-sm font-bold ${
                       formMsg.kind === 'ok'
                         ? 'bg-google-green/10 text-google-green'
@@ -717,9 +732,10 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
                 <motion.button
                   whileTap={{ scale: 0.97 }}
                   type="submit"
+                  disabled={savingItem}
                   className="w-full bg-google-blue text-white py-6 rounded-full font-black text-lg uppercase tracking-widest shadow-lg shadow-google-blue/20"
                 >
-                  Confirm &amp; Sync
+                  {savingItem ? 'Saving item…' : 'Save item'}
                 </motion.button>
               </form>
             </motion.div>

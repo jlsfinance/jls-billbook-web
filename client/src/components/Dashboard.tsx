@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, Barcode, Building2, Calculator, CalendarDays, ChevronDown, FileText, Landmark, Menu, Package, Plus, Receipt, ScanLine, ShoppingBag, TrendingUp, Wallet } from 'lucide-react';
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, Barcode, Building2, Calculator, CalendarDays, ChevronDown, FileText, Landmark, Menu, Moon, Package, Plus, Receipt, ScanLine, ShoppingBag, Sun, TrendingUp, Wallet } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import { HapticService } from '../services/hapticService';
 import { StorageService } from '../services/storageService';
 import { readDaybook, type DaybookEntry } from '../services/daybook';
@@ -49,6 +50,8 @@ function snapshot() {
 export default function Dashboard(props: DashboardProps) {
     const { company, companies, switchCompany, createCompany } = useCompany();
     const { isDemo } = useAuth();
+    const { resolvedTheme, setTheme } = useTheme();
+    const isDark = resolvedTheme === 'dark';
     const { onNavigate } = props;
     const [data, setData] = useState(snapshot);
     const [period, setPeriod] = useState<Period>('today');
@@ -114,6 +117,10 @@ export default function Dashboard(props: DashboardProps) {
                     className="flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 text-center">
                     <span className="block w-full truncate text-base font-bold">{company?.name || 'My business'}</span>
                     <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 text-xs font-semibold text-primary">Switch <ChevronDown size={12} /></span>
+                </button>
+                <button type="button" aria-label={isDark ? 'Use light theme' : 'Use dark theme'} onClick={() => setTheme(isDark ? 'light' : 'dark')}
+                    className="grid min-h-11 place-items-center rounded-full text-foreground hover:bg-surface-container-high">
+                    {isDark ? <Sun size={20} /> : <Moon size={20} />}
                 </button>
             </div>
         </header>

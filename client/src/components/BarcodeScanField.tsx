@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ChangeEvent, KeyboardEvent } from 'react';
 import { ScanLine, Camera, X, CheckCircle2 } from 'lucide-react';
-import { isBarcodeStructurallyValid, normalizeScannedBarcode, SCAN_IDLE_MS } from '../services/barcodeService';
+import { normalizeScannedBarcode, SCAN_IDLE_MS } from '../services/barcodeService';
 import type { BarcodeSource } from '../services/barcodeService';
 import { isScannerBurst, recordBarcodeInput } from '../services/barcodeInput';
 import type { BarcodeBurst } from '../services/barcodeInput';
@@ -46,6 +46,7 @@ export default function BarcodeScanField({
   callback.current = onScan;
   const [value, setValue] = useState('');
   const [cameraOpen, setCameraOpen] = useState(false);
+  const activeCamera = useRef(false);
   const [flash, setFlash] = useState(false);
   const [error, setError] = useState('');
   const [soundOn, setSoundOn] = useState(true);
@@ -106,17 +107,16 @@ export default function BarcodeScanField({
   }
 
   function closeCamera(focusBarcode: boolean) {
+    activeCamera.current = false;
     setCameraOpen(false);
     requestAnimationFrame(() => (focusBarcode ? inputRef.current : cameraButtonRef.current)?.focus());
   }
 
-  function linkBarcode(code: string, productId: string) {
+  async function linkBarcode(code: string, productId: string): Promise<ScanOutcome> {
     const item = StorageService.getProducts().find(product => product.id === productId && !product.isArchived && !product.barcode);
-    if (!item || !isBarcodeStructurallyValid(code)) return 'Choose an active item without a barcode.';
-    if (StorageService.isBarcodeTaken(code)) return 'This barcode is already linked. Scan it again to look it up.';
-    StorageService.updateProduct({ ...item, barcode: code, barcodeEnabled: true });
-    const outcome = accept(code, 'CAMERA');
-    return outcome === 'added' ? null : 'Barcode linked. Scan the label again to add the item.';
+    if (!item) throw new Error('Choose an active item without a barcode.');
+    await StorageService.saveProductConfirmed({ ...item, barcode: code, barcodeEnabled: true }, true);
+    return activeCamera.current ? accept(code, 'CAMERA') : 'rejected';
   }
 
   useEffect(() => {
@@ -151,6 +151,7 @@ export default function BarcodeScanField({
       {enableCamera && <button ref={cameraButtonRef} type="button" disabled={disabled} aria-label="Open camera scanner" onClick={() => {
         window.clearTimeout(idleTimer.current);
         if (soundOn) void SoundService.resume();
+        activeCamera.current = true;
         setCameraOpen(true);
       }} className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
         <Camera size={18} /><span>{continuous ? 'Scan items' : 'Camera'}</span>

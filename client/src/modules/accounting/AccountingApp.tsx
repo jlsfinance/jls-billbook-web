@@ -40,11 +40,9 @@ import { ViewState, Invoice, VoucherType, type Payment } from '@/types';
 import { StorageService } from '../../services/storageService';
 import { FirebaseService } from '../../services/firebaseService';
 import { WhatsAppService } from '../../services/whatsappService';
-import { Menu as SidebarIcon, Sun, Moon } from 'lucide-react';
+import { Menu as SidebarIcon } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
-import { useTheme } from 'next-themes';
-import { HapticService } from '@/services/hapticService';
 import { CompanyForm } from '@/components/CompanyForm';
 import Auth from '@/components/Auth';
 import { PermissionErrorModal } from '@/components/PermissionErrorModal';
@@ -108,7 +106,6 @@ function StartupScreen({ phase, failed = false }: { phase: string; failed?: bool
 const AccountingApp: React.FC = () => {
     const { user, loading: authLoading } = useAuth();
     const { company, loading: companyLoading, loadFailed: companyLoadFailed, permissionError } = useCompany();
-    const { theme, setTheme } = useTheme();
     const location = useLocation();
     const scrollContainer = React.useRef<HTMLElement>(null);
     const announcementsOpen = location.state?.settingsPanel === ANNOUNCEMENTS_PANEL;
@@ -429,37 +426,6 @@ const AccountingApp: React.FC = () => {
                 </div>
 
                 <main ref={scrollContainer} className="flex-1 overflow-y-auto h-full relative w-full scroll-smooth bg-slate-50 dark:bg-slate-900 pb-20 lg:pb-0">
-                    {!['DASHBOARD', 'VIEW_INVOICE', 'CREATE_INVOICE', 'EDIT_INVOICE', 'CREATE_VOUCHER', 'PUBLIC_VIEW_INVOICE', 'CREATE_PURCHASE', 'EDIT_PURCHASE', 'SMART_CALCULATOR', 'CREDIT_NOTE', 'CREATE_CREDIT_NOTE', 'CUSTOMER_LEDGER', 'REPORTS', 'POS_BILLING', 'CASH_AND_BANK', 'GODOWNS', 'BARCODE_LABELS', 'ONLINE_STORE', 'PAYMENT_REMINDERS', 'AUTOMATED_BILLS', 'COMPLIANCE_CENTER', 'STAFF_ROLES', 'RECYCLE_BIN'].includes(currentView) && (
-                        <div className="md:hidden sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm border-b border-slate-200/50 dark:border-slate-800/50 shadow-sm">
-                            <div className="h-16 px-4 flex items-center justify-between">
-                                <button
-                                    type="button"
-                                    aria-label="Open navigation"
-                                    onClick={() => setIsSidebarOpen(true)}
-                                    className="p-2 -ml-2 rounded-xl text-slate-600 dark:text-slate-400 active:bg-slate-100 dark:active:bg-slate-800"
-                                >
-                                    <SidebarIcon className="w-6 h-6" />
-                                </button>
-                                <div className="flex-1 text-center px-4 overflow-hidden">
-                                    <h2 className="truncate text-sm font-semibold leading-tight text-slate-900 dark:text-slate-100">
-                                        {company?.name || 'JLS Suite'}
-                                    </h2>
-                                </div>
-                                <button
-                                    type="button"
-                                    aria-label={theme === 'dark' ? 'Use light theme' : 'Use dark theme'}
-                                    onClick={() => {
-                                        setTheme(theme === 'dark' ? 'light' : 'dark');
-                                        HapticService.medium();
-                                    }}
-                                    className="p-2 -mr-2 rounded-xl text-slate-600 dark:text-slate-400 active:bg-slate-100 dark:active:bg-slate-800"
-                                >
-                                    {theme === 'dark' ? <Sun className="w-6 h-6 text-yellow-500" /> : <Moon className="w-6 h-6 text-blue-600" />}
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
                     <AnimatePresence mode="wait">
                         <motion.div
                             key={currentView}

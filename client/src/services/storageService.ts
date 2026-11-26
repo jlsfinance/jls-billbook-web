@@ -5,7 +5,7 @@ import {
   VoucherType, BankAccount, AccountTransaction, Godown, GodownTransfer, AutomatedBill, StaffMember
 } from '../types';
 import { FirebaseService } from './firebaseService';
-import { findProductByBarcode as findProductByBarcodePure, isBarcodeTaken as isBarcodeTakenPure, normalizeBarcode, detectBarcodeFormat } from './barcodeService';
+import { findProductByBarcode as findProductByBarcodePure, isBarcodeTaken as isBarcodeTakenPure, normalizeBarcode, detectBarcodeFormat, isBarcodeStructurallyValid } from './barcodeService';
 import { buildMovement, validateMovement, applyDeltaToProduct, hasIdempotencyKey, computeStockFromLedger, nextEntryNumber, reconcile } from './stockService';
 import type { MovementInput } from './stockService';
 import { addBillingDays, currentBillingDate, nextBillingDate, parseBillingDate } from './recurringBilling';
@@ -205,6 +205,32 @@ function storePayment(payment: Payment, index: number) {
 
 function recordCreator(entry: { createdBy?: string }) {
   if (!entry.createdBy && cache.currentUserId) entry.createdBy = cache.currentUserId;
+}
+
+function prepareProduct(product: Product): Product {
+  const barcode = normalizeBarcode(product.barcode || '');
+  const now = new Date().toISOString();
+  return {
+    ...product,
+    barcode: barcode || undefined,
+    barcodeFormat: barcode ? detectBarcodeFormat(barcode) : undefined,
+    barcodeEnabled: product.barcodeEnabled !== false,
+    createdAt: product.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+function cacheProduct(product: Product) {
+  const previous = cache.products;
+  cache.products = previous.some(item => item.id === product.id)
+    ? previous.map(item => item.id === product.id ? product : item)
+    : [...previous, product];
+  try {
+    StorageService.persistToLocalStorage();
+  } catch (error) {
+    cache.products = previous;
+    throw error;
+  }
 }
 
 export const StorageService = {
@@ -483,31 +509,46 @@ export const StorageService = {
   },
 
   saveProduct: (product: Product) => {
-    // Normalize the barcode once, at the single product write path:
-    //  - blank -> undefined (never an empty string, so the unique index stays meaningful)
-    //  - whitespace / control / zero-width characters stripped
-    //  - leading zeros PRESERVED (the value is never coerced to a number)
-    const normalizedBarcode = product.barcode ? normalizeBarcode(product.barcode) : '';
-    const now = new Date().toISOString();
-    const sanitized: Product = {
-      ...product,
-      barcode: normalizedBarcode || undefined,
-      barcodeFormat: normalizedBarcode
-        ? (product.barcodeFormat || detectBarcodeFormat(normalizedBarcode))
-        : undefined,
-      barcodeEnabled: product.barcodeEnabled !== false,
-      createdAt: product.createdAt || now,
-      updatedAt: now,
-    };
+    const sanitized = prepareProduct(product);
+    cacheProduct(sanitized);
+    if (cache.currentUserId && FirebaseService.isReady()) {
+      void FirebaseService.saveDocument(StorageService.getCollectionPath('products'), sanitized.id, sanitized);
+    }
+  },
 
-    const index = cache.products.findIndex(p => p.id === sanitized.id);
-    const newProducts = [...cache.products];
-    if (index >= 0) newProducts[index] = sanitized;
-    else newProducts.push(sanitized);
-    cache.products = newProducts;
+  saveProductConfirmed: async (product: Product, barcodeOnly = false): Promise<void> => {
+    const scope = cache;
+    const sanitized = prepareProduct(product);
+    const existing = cache.products.find(item => item.id === product.id);
+    if (barcodeOnly && (!existing || existing.isArchived || existing.barcode)) {
+      throw new Error('Choose an active item without a barcode.');
+    }
+    if (sanitized.barcode && !isBarcodeStructurallyValid(sanitized.barcode)) throw new Error('Barcode value is invalid.');
+    const clash = sanitized.barcode && StorageService.isBarcodeTaken(sanitized.barcode, sanitized.id);
+    if (clash) throw new Error('This barcode is already linked to ' + clash.name + '.');
 
-    StorageService.persistToLocalStorage();
-    if (FirebaseService.isReady()) FirebaseService.saveDocument(StorageService.getCollectionPath('products'), sanitized.id, sanitized);
+    if (scope.currentUserId) {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        throw new Error('You are offline. Reconnect and try saving again.');
+      }
+      try {
+        const path = StorageService.getCollectionPath('products');
+        if (barcodeOnly) {
+          await FirebaseService.updateDocument(path, sanitized.id, {
+            barcode: sanitized.barcode, barcodeFormat: sanitized.barcodeFormat, barcodeEnabled: true, updatedAt: sanitized.updatedAt,
+          });
+        } else {
+          await FirebaseService.writeDocument(path, sanitized.id, sanitized);
+        }
+      } catch (error) {
+        console.error('Product write failed', error);
+        throw new Error('The item could not be saved to your business. Please try again.');
+      }
+    }
+
+    if (cache !== scope) throw new Error('Business changed while saving. Reopen the original business to check the item.');
+    const latest = barcodeOnly ? scope.products.find(item => item.id === sanitized.id) : undefined;
+    cacheProduct(latest ? { ...latest, barcode: sanitized.barcode, barcodeFormat: sanitized.barcodeFormat, barcodeEnabled: true, updatedAt: sanitized.updatedAt } : sanitized);
   },
 
   updateProduct: (product: Product) => {

@@ -40,15 +40,17 @@ export const FirebaseService = {
     }
   },
 
-  // Generic Save (Set/Overwrite)
-  updateDocument: (collectionName: string, id: string, data: Record<string, string | undefined>) => {
+  // These writes report failures to callers that need remote confirmation.
+  writeDocument: (collectionName: string, id: string, data: object) => setDoc(doc(db, collectionName, id), data),
+
+  updateDocument: (collectionName: string, id: string, data: Record<string, string | boolean | undefined>) => {
     const fields = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
     return updateDoc(doc(db, collectionName, id), fields);
   },
 
   saveDocument: async (collectionName: string, id: string, data: any) => {
     try {
-      await setDoc(doc(db, collectionName, id), data);
+      await FirebaseService.writeDocument(collectionName, id, data);
     } catch (error) {
       console.error(`Error saving to ${collectionName}:`, error);
     }

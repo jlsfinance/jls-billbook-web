@@ -1,7 +1,7 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { browserLocalPersistence, browserSessionPersistence, indexedDBLocalPersistence, initializeAuth } from "firebase/auth";
 import type { FirebaseApp } from "firebase/app";
-import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
+import { getFirestore, initializeFirestore, enableIndexedDbPersistence } from "firebase/firestore";
 
 // Assuming FirebaseConfig type is defined elsewhere or needs to be added.
 // For the purpose of this edit, we'll assume it's available or will be handled.
@@ -46,7 +46,7 @@ function initializeBrowserAuth(app: FirebaseApp) {
 }
 
 export const auth = initializeBrowserAuth(accountingApp);
-export const db = getFirestore(accountingApp);
+export const db = initializeFirestore(accountingApp, { ignoreUndefinedProperties: true });
 
 // Application 2: Records (Ledger Module - JLS Suite)
 const recordsApp = getApps().length > 0 && getApps().find(a => a.name === 'records-app')

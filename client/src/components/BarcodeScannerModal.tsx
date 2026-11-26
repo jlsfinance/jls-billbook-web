@@ -32,7 +32,7 @@ interface BarcodeScannerModalProps {
   soundOn: boolean;
   onToggleSound: () => void;
   onFinalize?: { label: string; run: () => void };
-  linking?: { items: () => { id: string; name: string }[]; link: (code: string, productId: string) => string | null };
+  linking?: { items: () => { id: string; name: string }[]; link: (code: string, productId: string) => Promise<ScanOutcome> };
 }
 const currency = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
 
@@ -64,12 +64,28 @@ export default function BarcodeScannerModal({
   const [linkCode, setLinkCode] = useState('');
   const [productId, setProductId] = useState('');
   const [linkError, setLinkError] = useState('');
+  const [linkSaving, setLinkSaving] = useState(false);
 
   function cancelLink() {
     scanPaused.current = false;
     setLinkCode('');
     setProductId('');
     setLinkError('');
+  }
+
+  async function confirmLink() {
+    if (!linking || linkSaving || !productId) return;
+    setLinkSaving(true);
+    setLinkError('');
+    try {
+      const outcome = await linking.link(linkCode, productId);
+      setLastScan({ code: linkCode, outcome });
+      cancelLink();
+    } catch (error) {
+      setLinkError(error instanceof Error ? error.message : 'Barcode not saved. Try again.');
+    } finally {
+      setLinkSaving(false);
+    }
   }
 
   useEffect(() => {
@@ -205,19 +221,14 @@ export default function BarcodeScannerModal({
           setLinkCode(lastScan.code);
         }}>Link to an item</button>}
         {linkCode && <div className="mt-2 space-y-2">
-          {linkItems.length ? <select aria-label="Item without a barcode" value={productId} onChange={event => setProductId(event.target.value)} className="w-full rounded-lg border bg-background p-2 text-sm">
+          {linkItems.length ? <select aria-label="Item without a barcode" disabled={linkSaving} value={productId} onChange={event => setProductId(event.target.value)} className="w-full rounded-lg border bg-background p-2 text-sm">
             <option value="">Select an item without a barcode</option>
             {linkItems.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select> : <p className="text-xs text-muted-foreground">Add a new item under Items or Stock In to use this barcode.</p>}
           {linkError && <p role="alert" className="text-xs text-red-600">{linkError}</p>}
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={cancelLink} className="rounded-lg border px-3 py-2 text-xs">Keep scanning</button>
-            {linkItems.length > 0 && <button type="button" disabled={!productId} className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50" onClick={() => {
-              const problem = linking?.link(linkCode, productId);
-              if (problem) { setLinkError(problem); return; }
-              setLastScan({ code: linkCode, outcome: 'added' });
-              cancelLink();
-            }}>Link &amp; add 1</button>}
+            <button type="button" onClick={cancelLink} disabled={linkSaving} className="rounded-lg border px-3 py-2 text-xs">Keep scanning</button>
+            {linkItems.length > 0 && <button type="button" disabled={!productId || linkSaving} className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50" onClick={confirmLink}>{linkSaving ? 'Saving barcode…' : 'Link & add 1'}</button>}
           </div>
         </div>}
       </div>}
