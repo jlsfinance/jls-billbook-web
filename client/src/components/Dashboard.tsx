@@ -540,7 +540,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     <h3 className="text-[11px] font-black text-on-surface-variant uppercase tracking-[0.25em]">Recent Transactions</h3>
                     <motion.button
                         whileTap={{ scale: 0.95 }}
-                        onClick={onOpenReports}
+                        onClick={() => onNavigate?.(ViewState.DAYBOOK)}
                         className="text-[10px] font-black text-google-blue uppercase tracking-widest bg-google-blue/5 px-3 py-1 rounded-full"
                     >
                         View All

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { ViewState, VoucherType } from '../types';
 import { AppLanguage, getAppLanguage, setAppLanguage } from '../services/i18n';
+import { WorkspaceHeading, workspace } from './WorkspaceUI';
 
 interface MoreHubProps {
   onNavigate: (view: ViewState, voucherType?: VoucherType) => void;
@@ -70,19 +71,17 @@ export const MoreHub: React.FC<MoreHubProps> = ({ onNavigate }) => {
   })).filter(group => group.items.length > 0);
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-24 p-4">
-      <div className="max-w-4xl mx-auto space-y-5">
-        <header className="space-y-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Business tools</h1>
-          <label className="flex items-center gap-2 rounded-xl border bg-card px-3 py-2.5">
-            <Search size={18} className="shrink-0 text-muted-foreground" />
+    <div className="min-h-screen bg-surface-container-low">
+      <div className={workspace.page}>
+        <WorkspaceHeading title="Business tools" />
+        <label className={workspace.input + ' flex items-center gap-2'}>
+            <Search size={18} aria-hidden="true" className="shrink-0 text-muted-foreground" />
             <input type="search" aria-label="Search business tools" placeholder="Search tools" value={search} onChange={event => setSearch(event.target.value)}
               className="w-full bg-transparent text-sm outline-none" />
-          </label>
-        </header>
+        </label>
         {matchingGroups.length === 0 && <p role="status" className="rounded-xl border bg-card p-4 text-sm">No tools found for “{search.trim()}”.</p>}
         {matchingGroups.map((grp) => (
-          <section key={grp.title} className="bg-card rounded-2xl p-3 sm:p-4 border">
+          <section key={grp.title} className={workspace.panel + ' p-3 sm:p-4'}>
             <h2 className="text-sm font-semibold mb-2 px-1">{grp.title}</h2>
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
               {grp.items.map((item) => (

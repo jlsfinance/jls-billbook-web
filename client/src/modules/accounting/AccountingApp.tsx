@@ -54,6 +54,16 @@ import GlobalSearch from '@/components/GlobalSearch';
 import { ANNOUNCEMENTS_PANEL } from '@/components/AdminAdsManager';
 
 const STARTUP_WAIT_MS = 12_000;
+const routesWithBack = new Set([
+    ViewState.VIEW_INVOICE, ViewState.CUSTOMER_LEDGER, ViewState.CREATE_INVOICE, ViewState.EDIT_INVOICE,
+    ViewState.CREATE_VOUCHER, ViewState.CREATE_CREDIT_NOTE, ViewState.CREATE_PURCHASE, ViewState.EDIT_PURCHASE,
+]);
+const routesWithOwnSearch = new Set([
+    ...routesWithBack, ViewState.CUSTOMERS, ViewState.INVENTORY, ViewState.ALL_INVOICES, ViewState.INVOICES,
+    ViewState.PURCHASES, ViewState.QUOTATIONS, ViewState.PROFORMA_INVOICES, ViewState.DELIVERY_CHALLANS,
+    ViewState.PURCHASE_ORDERS, ViewState.DEBIT_NOTES, ViewState.DAYBOOK, ViewState.REPORTS, ViewState.MORE_HUB,
+    ViewState.POS_BILLING, ViewState.STOCK_IN,
+]);
 
 function StartupScreen({ phase, failed = false }: { phase: string; failed?: boolean }) {
     const [takingLonger, setTakingLonger] = useState(false);
@@ -94,7 +104,13 @@ const AccountingApp: React.FC = () => {
     const scrollContainer = React.useRef<HTMLElement>(null);
     const announcementsOpen = location.state?.settingsPanel === ANNOUNCEMENTS_PANEL;
 
-    const [currentView, setCurrentView] = useState<ViewState>(() => announcementsOpen ? ViewState.SETTINGS : ViewState.DASHBOARD);
+    const [currentView, updateCurrentView] = useState<ViewState>(() => announcementsOpen ? ViewState.SETTINGS : ViewState.DASHBOARD);
+    const returnViews = React.useRef<Partial<Record<ViewState, ViewState>>>({});
+    const setCurrentView = (next: ViewState) => {
+        if (next !== currentView && routesWithBack.has(next)) returnViews.current[next] = currentView;
+        updateCurrentView(next);
+    };
+    const backToSource = (fallback = ViewState.DASHBOARD) => updateCurrentView(returnViews.current[currentView] ?? fallback);
     const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
     const [invoiceToEdit, setInvoiceToEdit] = useState<Invoice | null>(null);
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
@@ -213,9 +229,11 @@ const AccountingApp: React.FC = () => {
             // setShowInvoiceActions(true); // This state is not defined in the current scope.
             setSelectedInvoice(linkedPayment ? StorageService.getInvoices().find(item => item.id === invoice.id) || invoice : invoice);
             setShowPostSaveActions(true); // Use existing state for post save actions
-            setCurrentView(ViewState.VIEW_INVOICE); // Stay on view invoice to show actions
+            returnViews.current[ViewState.VIEW_INVOICE] = returnViews.current[currentView] ?? ViewState.DASHBOARD;
+            updateCurrentView(ViewState.VIEW_INVOICE);
         } else {
-            setCurrentView(ViewState.DASHBOARD);
+            if (returnViews.current[currentView] === ViewState.VIEW_INVOICE) setSelectedInvoice(invoice);
+            backToSource();
         }
 
         // Reset Edit State
@@ -354,7 +372,7 @@ const AccountingApp: React.FC = () => {
                 <GlobalSearch
                     scrollContainer={scrollContainer}
                     viewKey={currentView}
-                    enabled={!announcementsOpen && !isSidebarOpen}
+                    enabled={!announcementsOpen && !isSidebarOpen && !routesWithOwnSearch.has(currentView)}
                     onSelectInvoice={handleSearchSelectInvoice}
                     onSelectCustomer={handleSearchSelectCustomer}
                 />
@@ -398,20 +416,21 @@ const AccountingApp: React.FC = () => {
                         <div className="md:hidden sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm border-b border-slate-200/50 dark:border-slate-800/50 shadow-sm">
                             <div className="h-16 px-4 flex items-center justify-between">
                                 <button
+                                    type="button"
+                                    aria-label="Open navigation"
                                     onClick={() => setIsSidebarOpen(true)}
                                     className="p-2 -ml-2 rounded-xl text-slate-600 dark:text-slate-400 active:bg-slate-100 dark:active:bg-slate-800"
                                 >
                                     <SidebarIcon className="w-6 h-6" />
                                 </button>
                                 <div className="flex-1 text-center px-4 overflow-hidden">
-                                    <h2 className="text-sm font-black text-slate-900 dark:text-slate-100 uppercase tracking-tighter truncate leading-tight">
+                                    <h2 className="truncate text-sm font-semibold leading-tight text-slate-900 dark:text-slate-100">
                                         {company?.name || 'JLS Suite'}
                                     </h2>
-                                    <p className="text-[9px] text-blue-600 dark:text-blue-400 font-black uppercase tracking-widest leading-tight">
-                                        {currentView.replace('_', ' ')}
-                                    </p>
                                 </div>
                                 <button
+                                    type="button"
+                                    aria-label={theme === 'dark' ? 'Use light theme' : 'Use dark theme'}
                                     onClick={() => {
                                         setTheme(theme === 'dark' ? 'light' : 'dark');
                                         HapticService.medium();
@@ -470,12 +489,12 @@ const AccountingApp: React.FC = () => {
                                     onEditInvoice={handleEditInvoice}
                                     initialCustomerId={currentView === ViewState.CUSTOMER_LEDGER ? selectedCustomerId || undefined : undefined}
                                     onBack={() => {
-                                        setCurrentView(ViewState.DASHBOARD);
+                                        backToSource();
                                         setSelectedCustomerId(null);
                                     }}
                                 />
                             )}
-                            {currentView === ViewState.DAYBOOK && <Daybook onViewCustomerLedger={handleViewCustomerLedger} />}
+                            {currentView === ViewState.DAYBOOK && <Daybook onViewCustomerLedger={handleViewCustomerLedger} onViewInvoice={handleViewInvoice} />}
                             {currentView === ViewState.EXPENSES && <Expenses onBack={() => setCurrentView(ViewState.DASHBOARD)} />}
                             {currentView === ViewState.PAYMENTS && <Payments onBack={() => setCurrentView(ViewState.DASHBOARD)} createDirection={paymentCreateDirection} onCreateOpened={clearPaymentCreate} />}
                             {currentView === ViewState.REPORTS && <Reports onBack={() => setCurrentView(ViewState.DASHBOARD)} />}
@@ -531,14 +550,14 @@ const AccountingApp: React.FC = () => {
                             {currentView === ViewState.VIEW_INVOICE && selectedInvoice && (
                                 <InvoiceView
                                     invoice={selectedInvoice}
-                                    onBack={() => { setSelectedInvoice(null); setCurrentView(ViewState.DASHBOARD); }}
+                                    onBack={() => { setSelectedInvoice(null); backToSource(); }}
                                     onEdit={() => handleEditInvoice(selectedInvoice)}
                                     onConverted={(conv) => { setSelectedInvoice(conv); setCurrentView(ViewState.VIEW_INVOICE); }}
                                     onDelete={(inv) => {
                                         if (isPurchaseBill(inv) || inv.type === 'PURCHASE_ORDER' || inv.type === 'DEBIT_NOTE') handleDeletePurchase(inv);
                                         else handleDeleteInvoice(inv);
                                         setSelectedInvoice(null);
-                                        setCurrentView(ViewState.DASHBOARD);
+                                        backToSource();
                                     }}
                                     showPostSaveActions={showPostSaveActions}
                                     onClosePostSaveActions={() => setShowPostSaveActions(false)}
@@ -555,7 +574,7 @@ const AccountingApp: React.FC = () => {
                                     voucherType={currentView === ViewState.CREATE_VOUCHER ? activeVoucherType : 'SALE'}
                                     startSmartCalc={startSmartCalc}
                                     onSave={handleSaveInvoice}
-                                    onCancel={() => { setCurrentView(ViewState.DASHBOARD); setInvoiceToEdit(null); setStartSmartCalc(false); setSelectedCustomerId(null); }}
+                                    onCancel={() => { backToSource(); setInvoiceToEdit(null); setStartSmartCalc(false); setSelectedCustomerId(null); }}
                                     isCreditNote={currentView === ViewState.CREATE_CREDIT_NOTE}
                                 />
                             )}
@@ -564,7 +583,7 @@ const AccountingApp: React.FC = () => {
                                 <CreatePurchase
                                     initialPurchase={invoiceToEdit}
                                     onSave={handleSavePurchase}
-                                    onCancel={() => { setCurrentView(ViewState.PURCHASES); setInvoiceToEdit(null); }}
+                                    onCancel={() => { backToSource(ViewState.PURCHASES); setInvoiceToEdit(null); }}
                                 />
                             )}
 

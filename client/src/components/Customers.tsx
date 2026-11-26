@@ -7,7 +7,7 @@ import { AlertModal } from '@/components/AlertModal';
 import { Customer, Invoice, Payment } from '../types';
 import { StorageService } from '../services/storageService';
 import { WhatsAppService } from '../services/whatsappService';
-import { Search, Phone, Mail, MapPin, ArrowLeft, FileText, Download, TrendingUp, Eye, X, Banknote, MessageCircle, Edit, Trash2, Plus, ChevronRight } from 'lucide-react';
+import { Search, Phone, Mail, MapPin, ArrowLeft, Download, TrendingUp, Eye, X, Banknote, MessageCircle, Edit, Trash2, Plus, ChevronRight } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -16,6 +16,7 @@ import InvoiceView from './InvoiceView';
 import { HapticService } from '@/services/hapticService';
 import { ContactsService } from '@/services/contactsService';
 import { formatDate } from '../utils/dateUtils';
+import { WorkspaceFilters, WorkspaceHeading, WorkspaceMetrics, workspace, workspaceMoney } from './WorkspaceUI';
 
 interface CustomersProps {
   onEditInvoice?: (invoice: Invoice) => void;
@@ -608,7 +609,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, initialCus
     doc.text(company.name.toUpperCase(), pageWidth - margin - 5, footerY, { align: 'right' });
 
     // Unified Save/Share Logic
-    const fileName = `Ledger_${selectedCustomer.company.replace(/[^a-zA-Z0-9]/g, '_')}_${todayDate}.pdf`;
+    const fileName = `Ledger_${(selectedCustomer.company || selectedCustomer.name || 'Party').replace(/[^a-zA-Z0-9]/g, '_')}_${todayDate}.pdf`;
     if (Capacitor.isNativePlatform()) {
       try {
         const pdfBase64 = doc.output('datauristring').split(',')[1];
@@ -677,7 +678,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, initialCus
             >
               <ArrowLeft className="w-5 h-5" />
             </motion.button>
-            <h2 className="text-xl font-bold text-foreground">Client Profile</h2>
+            <h2 className="text-lg font-semibold text-foreground">Party details</h2>
           </div>
 
           {/* Expressive Profile Card */}
@@ -693,10 +694,10 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, initialCus
                 <div>
                   <div className="flex items-center gap-4 mb-2">
                     <div className="w-16 h-16 rounded-[24px] bg-google-blue/10 flex items-center justify-center text-google-blue font-black text-3xl shadow-inner">
-                      {selectedCustomer.company.charAt(0)}
+                      {(selectedCustomer.company || selectedCustomer.name || 'Party').charAt(0)}
                     </div>
                     <div>
-                      <h1 className="text-3xl md:text-4xl font-black font-heading text-foreground tracking-tight leading-none">{selectedCustomer.company}</h1>
+                      <h1 className="text-3xl md:text-4xl font-black font-heading text-foreground tracking-tight leading-none">{selectedCustomer.company || selectedCustomer.name}</h1>
                       <div className="flex items-center gap-3 mt-2">
                         <span className="text-sm font-bold text-muted-foreground">{selectedCustomer.name}</span>
                         <span className="w-1 h-1 rounded-full bg-border" />
@@ -787,10 +788,10 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, initialCus
                   {/* Date Filter for History */}
                   <div className="px-8 py-6 border-b border-border bg-surface-container-high/30 flex flex-wrap items-center justify-between gap-4">
                     <h3 className="text-xs font-black text-muted-foreground uppercase tracking-[0.2em]">Transaction History</h3>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-bold text-muted-foreground">Filter:</span>
+                    <div className="flex flex-wrap items-center gap-2">
                       <input
                         type="date"
+                        aria-label="History from date"
                         value={historyFromDate}
                         onChange={(e) => setHistoryFromDate(e.target.value)}
                         className="px-3 py-2 bg-surface-container-high border border-border rounded-xl text-xs font-bold text-foreground outline-none focus:ring-2 focus:ring-google-blue/20"
@@ -798,6 +799,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, initialCus
                       <span className="text-xs font-bold text-muted-foreground">to</span>
                       <input
                         type="date"
+                        aria-label="History to date"
                         value={historyToDate}
                         onChange={(e) => setHistoryToDate(e.target.value)}
                         className="px-3 py-2 bg-surface-container-high border border-border rounded-xl text-xs font-bold text-foreground outline-none focus:ring-2 focus:ring-google-blue/20"
@@ -812,89 +814,25 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, initialCus
                     </div>
                   </div>
 
-                  <table className="w-full min-w-[800px]">
-                    <thead className="bg-surface-container-high/50 border-b border-border">
-                      <tr>
-                        <th className="px-8 py-6 text-left text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Date</th>
-                        <th className="px-8 py-6 text-left text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Reference</th>
-                        <th className="px-8 py-6 text-right text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Debit</th>
-                        <th className="px-8 py-6 text-right text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Credit</th>
-                        <th className="px-8 py-6 text-center text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Status</th>
-                        <th className="px-8 py-6 text-center text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {filteredHistoryTransactions.map((tx) => (
-                        <tr key={tx.id} className="hover:bg-surface-container-high/30 transition-colors group">
-                          <td className="px-8 py-6 text-sm font-bold text-muted-foreground">{formatDate(tx.date)}</td>
-                          <td className="px-8 py-6">
-                            <div className="flex flex-col">
-                              <span className={`text-sm font-black tracking-tight ${tx.type === 'INVOICE' ? 'text-foreground' : tx.type === 'CREDIT_NOTE' ? 'text-orange-600' : 'text-google-green'}`}>
-                                {tx.type === 'INVOICE' ? `Invoice #${tx.reference}` : tx.type === 'CREDIT_NOTE' ? `Return #${tx.reference}` : `Payment: ${tx.mode}`}
-                              </span>
-                              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mt-0.5">ID: {tx.data.id.slice(0, 6)}</span>
-                            </div>
-                          </td>
-                          <td className="px-8 py-6 text-right">
-                            {tx.type === 'INVOICE' ? (
-                              <span className="text-sm font-black text-foreground">₹{tx.amount.toFixed(2)}</span>
-                            ) : (
-                              <span className="text-sm font-bold text-muted-foreground/30">-</span>
-                            )}
-                          </td>
-                          <td className="px-8 py-6 text-right">
-                            {tx.type === 'PAYMENT' || tx.type === 'CREDIT_NOTE' ? (
-                              <span className={`text-sm font-black ${tx.type === 'CREDIT_NOTE' ? 'text-orange-600' : 'text-google-green'}`}>
-                                ₹{tx.amount.toFixed(2)}
-                              </span>
-                            ) : (
-                              <span className="text-sm font-bold text-muted-foreground/30">-</span>
-                            )}
-                          </td>
-                          <td className="px-8 py-6 text-center">
-                            <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${tx.type === 'INVOICE'
-                              ? tx.status === 'PAID' ? 'bg-green-100 border-green-200 text-green-700' : 'bg-amber-50 border-amber-200 text-amber-700'
-                              : tx.type === 'CREDIT_NOTE'
-                                ? 'bg-orange-100 border-orange-200 text-orange-700'
-                                : 'bg-green-50 border-green-200 text-green-700'
-                              }`}>
-                              {tx.type === 'INVOICE' ? tx.status : tx.type === 'CREDIT_NOTE' ? 'RETURN' : 'RECEIVED'}
-                            </span>
-                          </td>
-                          <td className="px-8 py-6">
-                            <div className="flex items-center justify-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
-                              <button
-                                onClick={() => handleShare(tx)}
-                                className="w-8 h-8 flex items-center justify-center rounded-full bg-green-50 text-green-600 hover:bg-green-100 transition-colors"
-                                title="Share"
-                              >
-                                <MessageCircle className="w-4 h-4" />
-                              </button>
-                              {(tx.type === 'INVOICE' || tx.type === 'CREDIT_NOTE') && (
-                                <button
-                                  onClick={() => setViewingInvoice(tx.data as Invoice)}
-                                  className="w-8 h-8 flex items-center justify-center rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
-                                  title="View"
-                                >
-                                  <Eye className="w-4 h-4" />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {transactions.length === 0 && (
-                        <tr>
-                          <td colSpan={6} className="py-20 text-center">
-                            <div className="flex flex-col items-center gap-4 opacity-50">
-                              <FileText className="w-12 h-12 text-muted-foreground" />
-                              <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">No transaction records found</p>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                  <ul className="divide-y divide-border" aria-label="Party transactions">
+                    {filteredHistoryTransactions.map(tx => {
+                      const outgoing = tx.type === 'PAYMENT' && (tx.data as Payment).type === 'PAID';
+                      const label = tx.type === 'INVOICE' ? 'Invoice' : tx.type === 'CREDIT_NOTE' ? 'Sales return' : outgoing ? 'Payment out' : 'Payment in';
+                      return <li key={tx.id} className="flex flex-wrap items-center gap-2 px-3 py-3 sm:px-4">
+                        <div className="min-w-0 flex-1">
+                          <p className="break-words text-sm font-semibold">{label} · {tx.reference}</p>
+                          <p className="text-xs text-muted-foreground">{formatDate(tx.date)}{tx.mode ? ' · ' + tx.mode.replace(/_/g, ' ') : ''}</p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="font-semibold tabular-nums">{workspaceMoney(tx.amount)}</p>
+                          {tx.status && <p className="text-xs text-muted-foreground">{tx.status === 'PARTIAL' ? 'Part-paid' : tx.status.toLowerCase()}</p>}
+                        </div>
+                        <button type="button" aria-label={'Share ' + tx.reference} onClick={() => handleShare(tx)} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-emerald-700 hover:bg-surface-container-high dark:text-emerald-300"><MessageCircle size={16} /></button>
+                        {tx.type !== 'PAYMENT' && <button type="button" aria-label={'View ' + tx.reference} onClick={() => setViewingInvoice(tx.data as Invoice)} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-primary hover:bg-surface-container-high"><Eye size={16} /></button>}
+                      </li>;
+                    })}
+                    {!filteredHistoryTransactions.length && <li className="px-4 py-10 text-center text-sm text-muted-foreground">No transactions in this period.</li>}
+                  </ul>
                 </motion.div>
               )}
 
@@ -1177,8 +1115,8 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, initialCus
 
   const filteredCustomers = customers.filter(c => {
     const matchesSearch =
-      c.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.company || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.phone && c.phone.includes(searchTerm));
     const matchesFilter =
       partyFilter === 'ALL' ||
@@ -1378,166 +1316,48 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, initialCus
         )}
       </AnimatePresence>
 
-      <div className="p-4 md:p-8 pb-32 max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10 pt-safe">
-          <div className="flex items-center gap-4">
-            {onBack && (
-              <motion.button
-                whileTap={{ scale: 0.9 }}
-                onClick={onBack}
-                className="w-12 h-12 rounded-full bg-surface-container-high flex items-center justify-center text-foreground hover:bg-surface-container-highest transition-colors"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </motion.button>
-            )}
-            <div>
-              <h2 className="text-4xl font-black font-heading text-foreground tracking-tight">Customers</h2>
-              <p className="text-sm font-bold text-muted-foreground mt-1">Manage client relationships</p>
-            </div>
-          </div>
-
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setShowAddCustomer(true)}
-            className="bg-primary text-white px-8 py-4 rounded-full flex items-center justify-center gap-3 font-black text-sm uppercase tracking-widest shadow-google hover:shadow-google-lg transition-all"
-          >
-            <Plus className="w-5 h-5" />
-            <span className="hidden sm:inline">Add Customer</span>
-          </motion.button>
-        </div>
-
-        {/* Search Bar + Filter Pills */}
-        <div className="space-y-3 mb-8">
-          <div className="relative">
-            <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search customers by name, company, or phone..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-14 pr-6 py-4 bg-surface rounded-[24px] shadow-sm border border-transparent focus:border-google-blue/30 focus:shadow-google transition-all outline-none font-medium text-foreground"
-            />
-          </div>
-          <div className="flex gap-2 overflow-x-auto no-scrollbar">
-            {([
-              { id: 'ALL', label: 'All Parties' },
-              { id: 'TO_COLLECT', label: 'To Collect (+)' },
-              { id: 'TO_PAY', label: 'To Pay (-)' },
-            ] as const).map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setPartyFilter(tab.id)}
-                className={`px-4 py-2 rounded-full text-xs font-bold border transition-all whitespace-nowrap ${
-                  partyFilter === tab.id
-                    ? 'bg-google-blue text-white border-google-blue shadow-sm'
-                    : 'bg-surface text-muted-foreground border-border'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {(partyGroups.length > 0 || groupFilter) && <div className="mb-4">
-          <select aria-label="Party group" value={groupFilter} onChange={event => setGroupFilter(event.target.value)}
-            className="max-w-full rounded-2xl border bg-background px-3 py-3 text-sm font-medium">
+      <div className={workspace.page}>
+        <WorkspaceHeading title="Parties" actions={<>
+          {onBack && <button type="button" aria-label="Back" onClick={onBack} className={workspace.secondary}><ArrowLeft size={16} /></button>}
+          <button type="button" onClick={() => setShowAddCustomer(true)} className={workspace.primary}><Plus size={16} /> Add party</button>
+        </>}>{customers.length} {customers.length === 1 ? 'party' : 'parties'}</WorkspaceHeading>
+        <WorkspaceMetrics values={[
+          { label: 'To collect', value: workspaceMoney(customers.reduce((sum, party) => sum + Math.max(0, Number(party.balance) || 0), 0)), tone: 'positive' },
+          { label: 'To pay', value: workspaceMoney(customers.reduce((sum, party) => sum + Math.max(0, -(Number(party.balance) || 0)), 0)), tone: 'attention' },
+        ]} />
+        <div className="flex flex-wrap gap-2">
+          <label className="relative min-w-[130px] flex-1">
+            <Search aria-hidden="true" size={17} className="pointer-events-none absolute left-3 top-3.5 text-muted-foreground" />
+            <input type="search" aria-label="Search parties" placeholder="Name, company or phone" value={searchTerm} onChange={event => setSearchTerm(event.target.value)} className={workspace.input + ' pl-9'} />
+          </label>
+          {(partyGroups.length > 0 || groupFilter) && <select aria-label="Party group" value={groupFilter} onChange={event => setGroupFilter(event.target.value)} className={workspace.input + ' w-auto max-w-full'}>
             <option value="">All party groups</option>
             {groupFilter && !partyGroups.includes(groupFilter) && <option value={groupFilter}>{groupFilter}</option>}
             {partyGroups.map(group => <option key={group} value={group}>{group}</option>)}
-          </select>
-        </div>}
-        {/* Customer Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          <AnimatePresence mode="popLayout">
-            {filteredCustomers.map(customer => (
-              <motion.div
-                layout
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                key={customer.id}
-                onClick={() => handleViewHistory(customer)}
-                className="bg-surface border border-border p-6 rounded-[32px] shadow-sm hover:shadow-google-lg transition-all cursor-pointer group relative overflow-hidden"
-              >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-surface-container-high rounded-full -mr-16 -mt-16 group-hover:bg-google-blue/10 transition-colors" />
-
-                <div className="flex justify-between items-start mb-6 relative">
-                  <div className="w-14 h-14 bg-surface-container-high text-google-blue rounded-[20px] flex items-center justify-center font-black text-xl shadow-inner group-hover:scale-110 transition-transform">
-                    {customer.company.charAt(0)}
-                  </div>
-                  <motion.button
-                    whileTap={{ scale: 0.9 }}
-                    onClick={(e) => { e.stopPropagation(); handleEditCustomer(customer); }}
-                    className="w-10 h-10 flex items-center justify-center text-muted-foreground hover:text-google-blue hover:bg-google-blue/10 rounded-full transition-colors"
-                  >
-                    <Edit className="w-5 h-5" />
-                  </motion.button>
-                </div>
-
-                <div className="relative mb-6">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="font-black text-foreground text-xl leading-tight truncate font-heading">{customer.company}</h3>
-                    {customer.type && customer.type !== 'CUSTOMER' && (
-                      <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[9px] font-black uppercase shrink-0">
-                        {customer.type}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm font-medium text-muted-foreground truncate">{customer.name}</p>
-                  {customer.partyCategory?.trim() && <p className="mt-1 truncate text-xs text-muted-foreground">{customer.partyCategory}</p>}
-                  {customer.creditLimit && customer.balance > customer.creditLimit && (
-                    <span className="inline-block mt-1.5 px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-[9px] font-black uppercase">
-                      Over Limit (Max ₹{customer.creditLimit.toLocaleString('en-IN')})
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex items-end justify-between border-t border-border pt-4 relative">
-                  <div className="flex items-center gap-2">
-                    <div>
-                      <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest block mb-1">Status</span>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wide ${customer.balance > 0 ? 'bg-red-100 text-red-700' : customer.balance < 0 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                        {customer.balance > 0 ? 'To Collect' : customer.balance < 0 ? 'To Pay' : 'Settled'}
-                      </span>
-                    </div>
-                    {customer.balance > 0 && customer.phone && (
-                      <button
-                        type="button"
-                        title="Send WhatsApp Reminder"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          WhatsAppService.sharePaymentReminder(customer, StorageService.getCompanyProfile(), customer.balance);
-                        }}
-                        className="p-2 rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors"
-                      >
-                        <MessageCircle className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest block mb-1">Balance</span>
-                    <span className={`text-2xl font-black tracking-tight ${customer.balance > 0 ? 'text-google-red' : 'text-google-green'}`}>
-                      ₹{Math.abs(customer.balance).toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
+          </select>}
         </div>
-
-        {filteredCustomers.length === 0 && (
-          <div className="text-center py-24 bg-surface-container-high/30 rounded-[40px] border-2 border-dashed border-border mt-8">
-            <div className="w-24 h-24 bg-surface-container-highest rounded-[32px] flex items-center justify-center mx-auto mb-6">
-              <Plus className="w-10 h-10 text-muted-foreground/40" />
-            </div>
-            <h3 className="text-2xl font-black text-foreground mb-2 font-heading">{searchTerm ? 'No Matching Customers' : 'No Customers Yet'}</h3>
-            <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">{searchTerm ? 'Try adjusting your search terms' : 'Add your first client to get started'}</p>
-          </div>
-        )}
+        <WorkspaceFilters label="Party balance filter" value={partyFilter} onChange={setPartyFilter} options={[
+          { id: 'ALL', label: 'All parties' }, { id: 'TO_COLLECT', label: 'To collect' }, { id: 'TO_PAY', label: 'To pay' },
+        ]} />
+        <ul aria-label="Parties" className={workspace.panel + ' divide-y divide-border overflow-hidden'}>
+          {filteredCustomers.map(customer => {
+            const name = customer.company?.trim() || customer.name?.trim() || 'Unnamed party';
+            const details = [customer.phone || (customer.name !== name ? customer.name : ''), customer.partyCategory, customer.type === 'VENDOR' ? 'Supplier' : customer.type === 'BOTH' ? 'Customer & supplier' : ''].filter(Boolean).join(' · ');
+            const value = Number(customer.balance) || 0;
+            return <li key={customer.id} className="flex items-center gap-1 px-2 sm:gap-2 sm:px-3">
+              <button type="button" aria-label={'Open party ' + name} onClick={() => handleViewHistory(customer)} className="flex min-h-[4.5rem] min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-2 text-left hover:bg-surface-container-low sm:gap-3">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 font-semibold text-primary">{name[0].toUpperCase()}</span>
+                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{name}</span>{details && <span className="block truncate text-xs text-muted-foreground">{details}</span>}
+                  {Number(customer.creditLimit) > 0 && value > Number(customer.creditLimit) && <span className="block text-xs text-red-700 dark:text-red-300">Over credit limit</span>}
+                </span>
+                <span className="shrink-0 text-right text-sm tabular-nums"><span className="block font-bold">{workspaceMoney(Math.abs(value))}</span><span className="block text-xs text-muted-foreground">{value > 0 ? 'To collect' : value < 0 ? 'To pay' : 'Settled'}</span></span>
+              </button>
+              {value > 0 && customer.phone && <button type="button" title="Send WhatsApp reminder" aria-label={'Send payment reminder to ' + name} onClick={() => WhatsAppService.sharePaymentReminder(customer, StorageService.getCompanyProfile(), value)} className="grid h-10 w-8 shrink-0 place-items-center rounded-lg text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400 sm:w-10"><MessageCircle size={16} /></button>}
+              <button type="button" aria-label={'Edit party ' + name} onClick={() => handleEditCustomer(customer)} className="grid h-10 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-surface-container-high hover:text-foreground sm:w-10"><Edit size={16} /></button>
+            </li>;
+          })}
+          {!filteredCustomers.length && <li className="p-10 text-center text-sm text-muted-foreground">{customers.length ? 'No parties match these filters.' : 'Add a party to start billing or tracking balances.'}</li>}
+        </ul>
       </div>
 
       {/* Add Customer Modal - M3 Expressive */}

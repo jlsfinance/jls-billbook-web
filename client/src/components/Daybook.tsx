@@ -1,259 +1,153 @@
-import React, { useState, useEffect } from 'react';
-import { StorageService } from '../services/storageService';
-import { Calendar, ArrowUpRight, ArrowDownLeft, Filter, Download, Briefcase, Wallet } from 'lucide-react';
-import jsPDF from 'jspdf';
-import { HapticService } from '@/services/hapticService';
-import { motion } from 'framer-motion';
-import { formatDate } from '../utils/dateUtils';
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
+import { useState } from 'react';
+import { ArrowDownLeft, ArrowUpRight, BookOpen, ChevronRight, Download, FileText, Receipt } from 'lucide-react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { Capacitor } from '@capacitor/core';
+import { Directory, Filesystem } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { StorageService } from '../services/storageService';
+import { inReportRange, localDay } from '../services/businessReports';
+import { formatDate } from '../utils/dateUtils';
+import type { Invoice } from '../types';
+import { WorkspaceFilters, WorkspaceHeading, WorkspaceMetrics, workspace, workspaceMoney } from './WorkspaceUI';
 
-interface DaybookProps {
-    initialDate?: string | null;
-    onViewCustomerLedger?: (customerId: string) => void;
-}
-
-const Daybook: React.FC<DaybookProps> = ({ initialDate, onViewCustomerLedger }) => {
-    const [fromDate, setFromDate] = useState(initialDate || new Date().toISOString().split('T')[0]);
-    const [toDate, setToDate] = useState(initialDate || new Date().toISOString().split('T')[0]);
-    const [transactions, setTransactions] = useState<any[]>([]);
-    const [summary, setSummary] = useState({
-        totalSales: 0,
-        cashSales: 0,
-        creditSales: 0,
-        totalReceived: 0,
-        totalTransactions: 0
-    });
-
-    useEffect(() => {
-        const invoices = StorageService.getInvoices() || [];
-        const payments = StorageService.getPayments() || [];
-
-        // Filter by date range
-        const dayInvoices = invoices.filter(i => i.date >= fromDate && i.date <= toDate);
-        const dayPayments = payments.filter(p => p.date >= fromDate && p.date <= toDate);
-
-        // Separate sales from credit notes
-        const daySales = dayInvoices.filter(i => i.type !== 'CREDIT_NOTE');
-        const dayCreditNotes = dayInvoices.filter(i => i.type === 'CREDIT_NOTE');
-
-        const sales = daySales.reduce((sum, i) => sum + i.total, 0);
-        const cashSales = daySales.filter(i => i.status === 'PAID').reduce((sum, i) => sum + i.total, 0);
-        const creditSales = daySales.filter(i => i.status === 'PENDING').reduce((sum, i) => sum + i.total, 0);
-
-        const received = dayPayments.reduce((sum, p) => sum + p.amount, 0);
-
-        setSummary({
-            totalSales: sales,
-            cashSales: cashSales,
-            creditSales: creditSales,
-            totalReceived: received + cashSales,
-            totalTransactions: dayInvoices.length + dayPayments.length
-        });
-
-        const combined = [
-            ...daySales.map(i => ({
-                id: i.id,
-                time: 'Invoice',
-                type: 'SALE',
-                party: i.customerName,
-                customerId: i.customerId,
-                amount: i.total,
-                mode: i.status === 'PAID' ? 'CASH' : 'CREDIT',
-                ref: i.invoiceNumber
-            })),
-            ...dayCreditNotes.map(i => ({
-                id: i.id,
-                time: 'Credit Note',
-                type: 'RETURN',
-                party: i.customerName,
-                customerId: i.customerId,
-                amount: i.total,
-                mode: 'CREDIT',
-                ref: i.invoiceNumber
-            })),
-            ...dayPayments.map(p => {
-                const cust = StorageService.getCustomers().find(c => c.id === p.customerId);
-                return {
-                    id: p.id,
-                    time: 'Payment',
-                    type: 'RECEIPT',
-                    party: cust?.company || cust?.name || 'Customer',
-                    customerId: p.customerId,
-                    amount: p.amount,
-                    mode: p.mode,
-                    ref: p.reference || 'N/A'
-                };
-            })
-        ];
-
-        setTransactions(combined);
-    }, [fromDate, toDate]);
-
-    const downloadPDF = async () => {
-        HapticService.medium();
-        try {
-            const doc = new jsPDF('p', 'mm', 'a4');
-            const company = StorageService.getCompanyProfile();
-            const pageWidth = doc.internal.pageSize.getWidth();
-            let yPos = 20;
-
-            doc.setFontSize(22);
-            doc.setTextColor(30, 41, 59);
-            doc.text(company?.name || 'Daybook', pageWidth / 2, yPos, { align: 'center' });
-            yPos += 10;
-
-            doc.setFontSize(10);
-            doc.setTextColor(100, 116, 139);
-            doc.text(`Transaction Summary: ${formatDate(fromDate)} to ${formatDate(toDate)}`, pageWidth / 2, yPos, { align: 'center' });
-            yPos += 15;
-
-            const fileName = `daybook-${fromDate}-to-${toDate}.pdf`;
-
-            if (Capacitor.isNativePlatform()) {
-                const pdfBase64 = doc.output('datauristring').split(',')[1];
-
-                // Save to Cache for sharing
-                const cacheResult = await Filesystem.writeFile({
-                    path: fileName,
-                    data: pdfBase64,
-                    directory: Directory.Cache
-                });
-
-                // Ask user what to do
-                const wantsToShare = confirm(`✅ ${fileName} saved!\n\nTap OK to SHARE/OPEN\nTap Cancel to just SAVE.`);
-
-                if (wantsToShare) {
-                    try {
-                        await Share.share({
-                            title: fileName,
-                            url: cacheResult.uri,
-                            dialogTitle: 'Share or Open with...'
-                        });
-                    } catch (shareErr) {
-                        console.warn('Share cancelled or failed:', shareErr);
-                    }
-                }
-            } else {
-                doc.save(fileName);
-            }
-        } catch (e) { alert("PDF Save failed"); }
-    };
-
-    return (
-        <div className="pt-safe px-4 md:px-8 bg-slate-50 dark:bg-slate-900 min-h-full pb-24">
-            <div className="max-w-5xl mx-auto">
-                <div className="flex justify-between items-end mb-8">
-                    <div>
-                        <p className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-1">Accounting Ledger</p>
-                        <h1 className="text-4xl font-black text-slate-900 dark:text-slate-100 tracking-tighter">Day Book</h1>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        <div className="bg-white dark:bg-slate-800 p-2 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-3">
-                            <div className="flex items-center gap-2">
-                                <Calendar className="w-4 h-4 text-slate-400" />
-                                <input
-                                    type="date"
-                                    value={fromDate}
-                                    onChange={(e) => setFromDate(e.target.value)}
-                                    className="bg-transparent text-sm font-bold outline-none text-slate-700 dark:text-slate-200 w-32"
-                                />
-                            </div>
-                            <span className="text-slate-400 font-bold">to</span>
-                            <input
-                                type="date"
-                                value={toDate}
-                                onChange={(e) => setToDate(e.target.value)}
-                                className="bg-transparent text-sm font-bold outline-none text-slate-700 dark:text-slate-200 w-32"
-                            />
-                        </div>
-                        <button onClick={downloadPDF} className="bg-slate-900 dark:bg-blue-600 text-white p-3 rounded-2xl shadow-xl active:scale-95 transition-all">
-                            <Download className="w-5 h-5" />
-                        </button>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                    <motion.div initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white dark:bg-slate-800 p-6 rounded-[32px] shadow-sm border border-slate-100 dark:border-slate-700">
-                        <div className="bg-blue-50 dark:bg-blue-900/30 w-10 h-10 rounded-xl flex items-center justify-center mb-4">
-                            <Briefcase className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                        </div>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Total Sales</p>
-                        <p className="text-3xl font-black text-slate-900 dark:text-slate-100">₹{summary.totalSales.toLocaleString()}</p>
-                        <p className="text-[10px] font-bold text-slate-400 mt-2">Cash: ₹{summary.cashSales} | Credit: ₹{summary.creditSales}</p>
-                    </motion.div>
-
-                    <motion.div initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }} className="bg-emerald-600 p-6 rounded-[32px] shadow-lg shadow-emerald-500/20 text-white">
-                        <div className="bg-white/20 w-10 h-10 rounded-xl flex items-center justify-center mb-4">
-                            <Wallet className="w-5 h-5 text-white" />
-                        </div>
-                        <p className="text-xs font-bold uppercase tracking-widest mb-1 opacity-70">Cash In Hand</p>
-                        <p className="text-3xl font-black">₹{summary.totalReceived.toLocaleString()}</p>
-                        <p className="text-[10px] font-bold mt-2 opacity-70">From Sales & Payments Received</p>
-                    </motion.div>
-
-                    <motion.div initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }} className="bg-white dark:bg-slate-800 p-6 rounded-[32px] shadow-sm border border-slate-100 dark:border-slate-700">
-                        <div className="bg-purple-50 dark:bg-purple-900/30 w-10 h-10 rounded-xl flex items-center justify-center mb-4">
-                            <Filter className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                        </div>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Entries</p>
-                        <p className="text-3xl font-black text-slate-900 dark:text-slate-100">{summary.totalTransactions}</p>
-                        <p className="text-[10px] font-bold text-slate-400 mt-2">Activity for {fromDate === toDate ? formatDate(fromDate) : `${formatDate(fromDate)} to ${formatDate(toDate)}`}</p>
-                    </motion.div>
-                </div>
-
-                <div className="bg-white dark:bg-slate-800 rounded-[32px] shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
-                        <h3 className="font-bold text-slate-800 dark:text-slate-100">Transaction Register</h3>
-                    </div>
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
-                            <thead className="bg-slate-50 dark:bg-slate-900/50">
-                                <tr>
-                                    <th className="px-6 py-4 text-left text-[10px] font-black text-slate-400 uppercase">Type</th>
-                                    <th className="px-6 py-4 text-left text-[10px] font-black text-slate-400 uppercase">Party</th>
-                                    <th className="px-6 py-4 text-left text-[10px] font-black text-slate-400 uppercase">Reference</th>
-                                    <th className="px-6 py-4 text-right text-[10px] font-black text-slate-400 uppercase">Amount</th>
-                                    <th className="px-6 py-4 text-center text-[10px] font-black text-slate-400 uppercase">Mode</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                                {transactions.map((tx, idx) => (
-                                    <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
-                                        <td className="px-6 py-4">
-                                            <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase ${tx.type === 'SALE' ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' :
-                                                tx.type === 'RETURN' ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' :
-                                                    'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400'
-                                                }`}>
-                                                {tx.type === 'SALE' ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownLeft className="w-3 h-3" />}
-                                                {tx.type}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <button
-                                                onClick={() => tx.customerId && onViewCustomerLedger?.(tx.customerId)}
-                                                className="text-sm font-bold text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors text-left"
-                                            >
-                                                {tx.party}
-                                            </button>
-                                        </td>
-                                        <td className="px-6 py-4 text-xs font-medium text-slate-400">{tx.ref}</td>
-                                        <td className="px-6 py-4 text-right">
-                                            <p className="text-sm font-black text-slate-900 dark:text-slate-100">₹{tx.amount.toLocaleString()}</p>
-                                        </td>
-                                        <td className="px-6 py-4 text-center">
-                                            <span className="text-[10px] font-bold text-slate-400 uppercase">{tx.mode}</span>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
+const filters = [
+    { id: 'all', label: 'All entries' }, { id: 'sale', label: 'Sales' }, { id: 'purchase', label: 'Purchases' },
+    { id: 'received', label: 'Money in' }, { id: 'paid', label: 'Money out' }, { id: 'expense', label: 'Expenses' },
+] as const;
+type Filter = typeof filters[number]['id'];
+type Entry = {
+    id: string; date: string; label: string; type: Exclude<Filter, 'all'>; name: string;
+    reference: string; amount: number; partyId?: string; invoice?: Invoice;
 };
 
-export default Daybook;
+function readDaybook(): Entry[] {
+    const parties = new Map(StorageService.getCustomers().map(party => [party.id, party.company || party.name]));
+    const voucherRow = (invoice: Invoice, type: 'sale' | 'purchase', label: string, sign = 1): Entry => ({
+        id: `${type}:${invoice.id}`, date: invoice.date, type, label, name: invoice.customerName || 'Walk-in',
+        reference: invoice.invoiceNumber, amount: sign * Math.abs(Number(invoice.total) || 0), partyId: invoice.customerId, invoice,
+    });
+    const vouchers = [
+        ...StorageService.getInvoices().map(invoice => invoice.type === 'CREDIT_NOTE'
+            ? voucherRow(invoice, 'sale', 'Sales return', -1) : voucherRow(invoice, 'sale', 'Sale')),
+        ...StorageService.getPurchases().map(invoice => voucherRow(invoice, 'purchase', 'Purchase')),
+        ...StorageService.getVouchersByType('DEBIT_NOTE').map(invoice => voucherRow(invoice, 'purchase', 'Purchase return', -1)),
+    ].filter(row => row.invoice?.conversionStatus !== 'CANCELLED');
+    const payments = StorageService.getPayments().map((payment): Entry => {
+        const outgoing = payment.type === 'PAID';
+        const status = payment.mode === 'CHEQUE' && payment.chequeStatus && payment.chequeStatus !== 'CLEARED'
+            ? ` · Cheque ${payment.chequeStatus.toLowerCase()}` : '';
+        return { id: `payment:${payment.id}`, date: payment.date, type: outgoing ? 'paid' : 'received',
+            label: (outgoing ? 'Payment out' : 'Payment in') + status, name: parties.get(payment.customerId) || 'Walk-in',
+            reference: payment.reference || payment.invoiceNumber || payment.mode.replace(/_/g, ' '),
+            amount: Number(payment.amount) || 0, partyId: payment.customerId };
+    });
+    const expenses = StorageService.getExpenses().map((expense): Entry => ({
+        id: `expense:${expense.id}`, date: expense.date, label: 'Expense', type: 'expense',
+        name: expense.description || expense.category, reference: expense.invoiceRef || expense.category, amount: Number(expense.amount) || 0,
+    }));
+    return [...vouchers, ...payments, ...expenses].sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export default function Daybook({ initialDate, onViewCustomerLedger, onViewInvoice }: {
+    initialDate?: string | null; onViewCustomerLedger?: (customerId: string) => void; onViewInvoice?: (invoice: Invoice) => void;
+}) {
+    const [from, setFrom] = useState(() => initialDate || localDay());
+    const [to, setTo] = useState(() => initialDate || localDay());
+    const [type, setType] = useState<Filter>('all');
+    const [query, setQuery] = useState('');
+    const [exportError, setExportError] = useState(false);
+    const valid = Boolean(from && to && from <= to);
+    const inPeriod = valid ? readDaybook().filter(entry => inReportRange(entry.date, from, to)) : [];
+    const search = query.trim().toLowerCase();
+    const visible = inPeriod.filter(entry => (type === 'all' || entry.type === type) &&
+        (!search || `${entry.name} ${entry.reference} ${entry.label}`.toLowerCase().includes(search)));
+    const sum = (kind: Entry['type']) => inPeriod.filter(entry => entry.type === kind).reduce((total, entry) => total + entry.amount, 0);
+    const grouped = new Map<string, Entry[]>();
+    for (const entry of visible) {
+        const day = entry.date.slice(0, 10);
+        const group = grouped.get(day) ?? [];
+        group.push(entry);
+        grouped.set(day, group);
+    }
+
+    function changePeriod(period: 'today' | 'yesterday' | 'month') {
+        const date = new Date();
+        if (period === 'yesterday') date.setDate(date.getDate() - 1);
+        const end = localDay(date);
+        setFrom(period === 'month' ? end.slice(0, 8) + '01' : end);
+        setTo(end);
+    }
+
+    async function downloadPDF() {
+        setExportError(false);
+        const doc = new jsPDF();
+        doc.setFontSize(18);
+        doc.text(StorageService.getCompanyProfile().name || 'BillBook', 14, 18);
+        doc.setFontSize(11);
+        doc.text(`Daybook | ${formatDate(from)} to ${formatDate(to)}`, 14, 26);
+        autoTable(doc, {
+            startY: 34, head: [['Date', 'Entry', 'Party / details', 'Reference', 'Amount (INR)']],
+            body: visible.map(entry => [formatDate(entry.date), entry.label, entry.name, entry.reference, entry.amount.toFixed(2)]),
+        });
+        const path = `daybook-${from}-to-${to}.pdf`;
+        if (!Capacitor.isNativePlatform()) {
+            doc.save(path);
+            return;
+        }
+        try {
+            const { uri } = await Filesystem.writeFile({ path, data: doc.output('datauristring').split(',')[1], directory: Directory.Cache });
+            await Share.share({ title: 'Daybook PDF', url: uri });
+        } catch {
+            setExportError(true);
+        }
+    }
+
+    return <div className={workspace.page}>
+        <WorkspaceHeading title="Daybook" actions={<button type="button" disabled={!visible.length} onClick={downloadPDF} className={workspace.secondary}><Download size={16} /> PDF</button>}>
+            Sales, purchases, payments and expenses for the selected period.
+        </WorkspaceHeading>
+        {exportError && <p role="alert" className="text-sm text-red-700 dark:text-red-300">Could not export the Daybook PDF.</p>}
+        <div className={`${workspace.panel} space-y-3 p-3 sm:p-4`}>
+            <div className="flex flex-wrap gap-2">
+                {(['today', 'yesterday', 'month'] as const).map(period => <button type="button" key={period} onClick={() => changePeriod(period)} className={`${workspace.secondary} min-h-9 text-xs`}>
+                    {period === 'today' ? 'Today' : period === 'yesterday' ? 'Yesterday' : 'This month'}
+                </button>)}
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_1fr_2fr]">
+                <label className="min-w-0 space-y-1 text-xs font-medium text-muted-foreground">From<input aria-label="From" className={workspace.input} type="date" value={from} onChange={event => setFrom(event.target.value)} /></label>
+                <label className="min-w-0 space-y-1 text-xs font-medium text-muted-foreground">To<input aria-label="To" className={workspace.input} type="date" value={to} onChange={event => setTo(event.target.value)} /></label>
+                <label className="col-span-2 min-w-0 space-y-1 text-xs font-medium text-muted-foreground sm:col-span-1">Search<input className={workspace.input} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Party, voucher or reference" /></label>
+            </div>
+        </div>
+        {valid && <WorkspaceMetrics values={[
+            { label: 'Net sales', value: workspaceMoney(sum('sale')) },
+            { label: 'Net purchases', value: workspaceMoney(sum('purchase')) },
+            { label: 'Receipts recorded', value: workspaceMoney(sum('received')), tone: 'positive' },
+            { label: 'Payments & expenses', value: workspaceMoney(sum('paid') + sum('expense')), tone: 'attention' },
+        ]} />}
+        <WorkspaceFilters value={type} onChange={setType} options={filters} label="Daybook entry type" />
+        <section className={`${workspace.panel} divide-y divide-border overflow-hidden`} aria-label="Transaction register">
+            <h2 className="flex items-center justify-between gap-2 px-4 py-3 text-sm font-semibold">Transaction register <span className="text-xs font-medium text-muted-foreground">{visible.length} entries</span></h2>
+            {!visible.length && <div role="status" className="grid justify-items-center gap-2 px-4 py-10 text-center text-sm text-muted-foreground"><BookOpen size={23} />{valid ? 'No entries match these filters.' : 'Choose a valid date range.'}</div>}
+            {[...grouped].map(([date, entries]) => <div key={date}>
+                <h3 className="bg-surface-container-low px-4 py-2 text-xs font-semibold text-muted-foreground">{formatDate(date)}</h3>
+                <ul className="divide-y divide-border">
+                    {entries.map(entry => {
+                        const Icon = entry.type === 'received' ? ArrowDownLeft : entry.type === 'paid' ? ArrowUpRight : entry.type === 'expense' ? Receipt : FileText;
+                        const open = entry.invoice && onViewInvoice ? () => onViewInvoice(entry.invoice!)
+                            : entry.partyId && onViewCustomerLedger ? () => onViewCustomerLedger(entry.partyId!) : undefined;
+                        const row = <>
+                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><Icon size={16} /></span>
+                            <span className="min-w-0 flex-1"><span className="block truncate font-semibold text-foreground">{entry.name}</span><span className="block break-words text-xs text-muted-foreground">{entry.label}{entry.reference ? ` · ${entry.reference}` : ''}</span></span>
+                            <span className="whitespace-nowrap font-semibold tabular-nums">{workspaceMoney(entry.amount)}</span>
+                            {open && <ChevronRight size={15} className="shrink-0 text-muted-foreground" />}
+                        </>;
+                        return <li key={entry.id}>{open ? <button type="button" onClick={open} className="flex min-h-14 w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-container-low sm:gap-3 sm:px-4">{row}</button>
+                            : <div className="flex min-h-14 items-center gap-2 px-3 py-2 text-sm sm:gap-3 sm:px-4">{row}</div>}</li>;
+                    })}
+                </ul>
+            </div>)}
+        </section>
+    </div>;
+}

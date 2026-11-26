@@ -91,7 +91,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, isOpen, onCl
           {/* Header */}
           <div className="h-16 flex items-center justify-between px-6 border-b border-slate-100 dark:border-slate-800">
             <h1 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tighter italic">JLS Bill</h1>
-            <button onClick={onClose} className="lg:hidden p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-900">
+            <button type="button" aria-label="Close navigation" onClick={onClose} className="lg:hidden p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-900">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -105,6 +105,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, isOpen, onCl
                   {group.items.map((item: any) => (
                     <button
                       key={item.id}
+                      type="button"
+                      aria-current={currentView === item.id ? 'page' : undefined}
                       onClick={() => {
                         HapticService.light();
                         if (item.isSpecial && onOpenBackup) {
@@ -118,7 +120,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate, isOpen, onCl
                       className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-bold text-sm ${item.isSpecial
                         ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 border border-green-200 dark:border-green-800'
                         : currentView === item.id
-                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
+                          ? 'bg-blue-50 text-blue-800 ring-1 ring-blue-200 dark:bg-blue-950/70 dark:text-blue-200 dark:ring-blue-900'
                           : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-900'
                         }`}
                     >

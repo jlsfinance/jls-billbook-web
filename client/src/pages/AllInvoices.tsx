@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, memo, useEffect } from 'react';
 import { Invoice, VoucherType } from '../types';
 import { StorageService } from '../services/storageService';
 import { AnalyticsService } from '../services/analyticsService';
-import { Search, MoreVertical, FileText, Trash2, Users, Edit, Eye, ChevronRight, Plus, Download, Calendar, Clock, BookOpen, ArrowRightLeft } from 'lucide-react';
+import { Search, MoreVertical, FileText, Trash2, Users, Edit, Eye, ChevronRight, Plus, Download, BookOpen, ArrowRightLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { HapticService } from '../services/hapticService';
 import { useCompany } from '../contexts/CompanyContext';
@@ -11,6 +11,9 @@ import { isLowEndDevice, debounce } from '../utils/performance';
 import { ConfirmationModal } from '../components/ConfirmationModal';
 import { formatDate } from '../utils/dateUtils';
 import SmartCalcHelpModal from '../components/SmartCalcHelpModal';
+import { WorkspaceFilters, WorkspaceHeading, WorkspaceMetrics, workspace, workspaceMoney } from '../components/WorkspaceUI';
+import { localDay, inReportRange } from '../services/businessReports';
+import { getInvoicePaid } from '../services/paymentAllocation';
 
 // Check device capability once
 const IS_LOW_END = isLowEndDevice();
@@ -48,134 +51,38 @@ const trackAnalytics = (action: string, metadata: any = {}) => {
   }
 };
 
-// Memoized Invoice Card with better design
-const InvoiceCard = memo(({
-  invoice,
-  onView,
-  onDelete,
-  onMenuOpen,
-  isLowEnd
-}: {
-  invoice: Invoice;
-  onView?: (inv: Invoice) => void;
-  onDelete: (inv: Invoice) => void;
-  onMenuOpen: (inv: Invoice) => void;
-  isLowEnd: boolean;
-  showQuickActions?: boolean;
+const paymentFilters = [
+  { id: 'ALL', label: 'All statuses' }, { id: 'PAID', label: 'Paid' },
+  { id: 'PENDING', label: 'Pending' }, { id: 'PARTIAL', label: 'Part-paid' }, { id: 'OVERDUE', label: 'Overdue' },
+] as const;
+type PaymentFilter = typeof paymentFilters[number]['id'];
+
+const InvoiceCard = memo(({ invoice, onView, onMenuOpen }: {
+  invoice: Invoice; onView?: (invoice: Invoice) => void; onMenuOpen: (invoice: Invoice) => void;
 }) => {
-  const handleClick = useCallback(() => {
-    trackAnalytics('VIEW_INVOICE_ITEM', { invoiceId: invoice.id });
-    onView?.(invoice);
-  }, [invoice, onView]);
-
-  const handleMenu = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    HapticService.light();
-    onMenuOpen(invoice);
-  }, [invoice, onMenuOpen]);
-
-  const statusColor = invoice.type === 'CREDIT_NOTE' 
-    ? 'bg-orange-100 text-orange-700' 
-    : invoice.status === 'PAID' 
-      ? 'bg-google-green text-white' 
-      : invoice.status === 'OVERDUE' 
-        ? 'bg-google-red text-white' 
-        : 'bg-google-yellow text-white';
-
-  if (isLowEnd) {
-    return (
-      <div
-        className="bg-surface-container-low p-4 flex justify-between items-center rounded-2xl border border-border cursor-pointer"
-        onClick={handleClick}
-      >
-        <div className="flex items-center gap-2">
-          <div className="min-w-0">
-            <h3 className="font-bold text-foreground text-sm truncate max-w-[140px]">{invoice.customerName}</h3>
-            <p className="text-[10px] text-muted-foreground font-medium flex items-center gap-1">
-              <span>#{invoice.invoiceNumber}</span>
-              {invoice.type === 'CREDIT_NOTE' && <span className="text-orange-600 font-bold bg-orange-100 px-1 rounded-sm">CN</span>}
-              <span>• {formatDate(invoice.date)}</span>
-              {invoice.status === 'OVERDUE' && <span className="text-red-500 ml-1">OVERDUE</span>}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="text-right">
-            <p className="text-sm font-bold text-foreground">₹{invoice.total.toLocaleString('en-IN')}</p>
-            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${statusColor}`}>
-              {invoice.status || invoice.type === 'CREDIT_NOTE' ? 'CREDIT' : 'PAID'}
-            </span>
-          </div>
-          <button onClick={handleMenu} className="p-1.5 text-muted-foreground">
-            <MoreVertical className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="group relative overflow-hidden rounded-[28px] bg-surface-container-low border border-border shadow-sm transition-all duration-300 hover:shadow-md hover:border-border/50">
-      {/* Background gradient on hover */}
-      <div className="absolute inset-0 bg-google-blue/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-[28px]" />
-      
-      {/* Delete overlay on long press */}
-      <div className="absolute inset-0 bg-red-500/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-[28px] cursor-pointer"
-           onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleMenu(e); }}>
-        <Trash2 className="w-12 h-12 text-red-600/60 absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-      </div>
-
-      <motion.div
-        drag="x"
-        dragConstraints={{ left: -100, right: 0 }}
-        dragElastic={0.6}
-        dragMomentum={false}
-        onDragEnd={(_, info) => {
-          if (info.offset.x < -80) {
-            HapticService.medium();
-            onDelete(invoice);
-          }
-        }}
-        whileTap={{ scale: 0.99 }}
-        className="bg-surface-container-low p-5 flex justify-between items-center relative z-10 cursor-pointer"
-        onClick={handleClick}
-      >
-        <div className="flex items-center gap-4">
-          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${invoice.type === 'CREDIT_NOTE' ? 'bg-orange-100 text-orange-600' : invoice.status === 'PAID' ? 'bg-google-green/10 text-google-green' : 'bg-google-yellow/10 text-google-yellow'}`}>
-            <FileText className="w-6 h-6" />
-          </div>
-          <div>
-            <h3 className="font-bold text-foreground text-base tracking-tight">{invoice.customerName}</h3>
-            <p className="text-[11px] text-muted-foreground font-semibold flex items-center gap-2 mt-0.5">
-              <span className="flex items-center gap-1">
-                <Calendar className="w-3 h-3" />
-                {formatDate(invoice.date)}
-              </span>
-              <span className="text-slate-300">|</span>
-              <span className="text-[10px] font-bold uppercase tracking-wider">#{invoice.invoiceNumber}</span>
-              {invoice.type === 'CREDIT_NOTE' && <span className="text-[9px] text-orange-600 font-bold bg-orange-100 px-1.5 py-0.5 rounded-md">CN</span>}
-            </p>
-            {invoice.status === 'OVERDUE' && (
-              <p className="text-[10px] font-bold text-google-red mt-1 flex items-center gap-1">
-                <Clock className="w-3 h-3" /> OVERDUE
-              </p>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="text-right">
-            <p className="text-xl font-black text-foreground">₹{invoice.total.toLocaleString('en-IN')}</p>
-            <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${statusColor}`}>
-              {invoice.type === 'CREDIT_NOTE' ? 'CREDIT' : invoice.status === 'PAID' ? 'PAID' : invoice.status === 'OVERDUE' ? 'OVERDUE' : 'PENDING'}
-            </span>
-          </div>
-          <button className="p-2.5 rounded-full hover:bg-surface-container-highest transition-all group active:scale-90" onClick={handleMenu}>
-            <MoreVertical className="w-5 h-5 text-muted-foreground group-hover:text-foreground" />
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  );
+  const isReturn = invoice.type === 'CREDIT_NOTE' || invoice.type === 'DEBIT_NOTE';
+  const isBill = !invoice.type || invoice.type === 'SALE' || invoice.type === 'PURCHASE';
+  const badge = isReturn ? 'Return' : isBill ? paymentFilters.find(option => option.id === invoice.status)?.label || 'Pending'
+    : invoice.conversionStatus === 'CONVERTED' ? 'Converted' : invoice.conversionStatus === 'CANCELLED' ? 'Cancelled' : 'Open';
+  const color = isReturn || invoice.status === 'OVERDUE' ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300'
+    : isBill && invoice.status === 'PAID' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-primary/10 text-primary dark:text-blue-300';
+  return <article className={workspace.panel + ' flex items-center gap-1 px-2 sm:px-3'}>
+    <button type="button" disabled={!onView} aria-label={'Open bill ' + invoice.invoiceNumber} onClick={() => {
+      trackAnalytics('VIEW_INVOICE_ITEM', { invoiceId: invoice.id });
+      onView?.(invoice);
+    }} className="flex min-h-[4.5rem] min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-2 text-left hover:bg-surface-container-low sm:gap-3">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><FileText size={17} /></span>
+      <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{invoice.customerName || 'Walk-in'}</span>
+        <span className="block break-words text-xs text-muted-foreground">{invoice.invoiceNumber} · {formatDate(invoice.date)}</span>
+      </span>
+      <span className="shrink-0 text-right tabular-nums"><span className="block text-sm font-bold">{workspaceMoney(Number(invoice.total))}</span>
+        <span className={'inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold ' + color}>{badge}</span></span>
+    </button>
+    <button type="button" aria-label={'Actions for bill ' + invoice.invoiceNumber} className="grid h-10 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-surface-container-low sm:w-10" onClick={() => {
+      HapticService.light();
+      onMenuOpen(invoice);
+    }}><MoreVertical size={18} /></button>
+  </article>;
 });
 
 InvoiceCard.displayName = 'InvoiceCard';
@@ -211,7 +118,8 @@ const AllInvoices: React.FC<AllInvoicesProps> = ({
 
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAID' | 'PENDING' | 'OVERDUE'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<PaymentFilter>('ALL');
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'month'>('all');
   const [selectedForAction, setSelectedForAction] = useState<Invoice | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const { company } = useCompany();
@@ -231,12 +139,14 @@ const AllInvoices: React.FC<AllInvoicesProps> = ({
   const filteredInvoices = useMemo(() => {
     return filteredSalesInvoices.filter(inv => {
       const matchesSearch =
-        inv.customerName.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-        inv.invoiceNumber.toLowerCase().includes(debouncedSearch.toLowerCase());
+        (inv.customerName || '').toLowerCase().includes(debouncedSearch.trim().toLowerCase()) ||
+        (inv.invoiceNumber || '').toLowerCase().includes(debouncedSearch.trim().toLowerCase());
       const matchesStatus = statusFilter === 'ALL' || inv.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const today = localDay();
+      const matchesDate = dateFilter === 'all' || inReportRange(inv.date, dateFilter === 'today' ? today : today.slice(0, 8) + '01', today);
+      return matchesSearch && matchesStatus && matchesDate;
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [filteredSalesInvoices, debouncedSearch, statusFilter]);
+  }, [filteredSalesInvoices, debouncedSearch, statusFilter, dateFilter]);
 
   // Visible items
   const visibleInvoices = useMemo(() => filteredInvoices.slice(0, visibleCount), [filteredInvoices, visibleCount]);
@@ -253,7 +163,7 @@ const AllInvoices: React.FC<AllInvoicesProps> = ({
 
   const confirmDelete = async () => {
     if (invoiceToDelete) {
-      if (onDelete) onDelete(invoiceToDelete);
+      if (onDelete) { onDelete(invoiceToDelete); setRefreshTick(tick => tick + 1); }
       else {
         StorageService.deleteInvoice(invoiceToDelete.id);
         window.location.reload();
@@ -278,124 +188,40 @@ const AllInvoices: React.FC<AllInvoicesProps> = ({
   }, []);
 
   return (
-    <div className="bg-background min-h-screen pb-32">
-      {/* Google Search Style Header */}
-      <div className="sticky top-0 z-30 bg-background px-4 pt-safe pb-4">
-        <div className="max-w-5xl mx-auto">
-          <div className="flex justify-between items-center mb-6">
-            <h1 className="text-4xl font-black font-heading text-foreground tracking-tight">{title}</h1>
-            <div className="flex items-center gap-2.5">
-              <span className="px-3 py-1 bg-surface-container-highest text-muted-foreground text-[10px] font-bold rounded-full border border-border uppercase tracking-widest">
-                {filteredInvoices.length} Bills
-              </span>
-              {onCreate && (
-                <button
-                  onClick={onCreate}
-                  className="px-3.5 py-2 rounded-full bg-google-blue text-white text-xs font-bold flex items-center gap-1 shadow-sm"
-                >
-                  <Plus className="w-4 h-4" />
-                  {createLabel}
-                </button>
-              )}
-              <button
-                onClick={() => setShowHelp(true)}
-                className="p-2 rounded-xl hover:bg-surface-container-highest text-muted-foreground hover:text-foreground transition-all"
-                title="How Smart Calculator works"
-              >
-                <BookOpen className="w-5 h-5" />
-              </button>
-            </div>
+    <div className="min-h-screen bg-surface-container-low">
+      <div className={workspace.page}>
+        <WorkspaceHeading title={title} actions={<>
+          {onCreate && <button type="button" onClick={onCreate} className={workspace.primary}><Plus size={16} /> {createLabel}</button>}
+          <button type="button" aria-label="Smart Calculator help" onClick={() => setShowHelp(true)} className={workspace.secondary}><BookOpen size={16} /></button>
+        </>} />
+        <WorkspaceMetrics values={[
+          { label: 'Documents', value: filteredInvoices.length },
+          { label: 'Document total', value: workspaceMoney(filteredInvoices.reduce((sum, invoice) => sum + (Number(invoice.total) || 0), 0)) },
+          ...((title === 'Sales' && docFilter !== 'CREDIT_NOTE' || title === 'Purchases') ? [{
+            label: title === 'Purchases' ? 'Balance to pay' : 'Balance to collect', tone: 'attention' as const,
+            value: workspaceMoney(filteredInvoices.reduce((sum, invoice) => sum + (invoice.status === 'PAID' ? 0 : Math.max(0, Number(invoice.balanceDue ?? Number(invoice.total) - getInvoicePaid(invoice)) || 0)), 0)),
+          }] : []),
+        ]} />
+        {title === 'Sales' && <WorkspaceFilters<VoucherType | 'ALL'> label="Sales documents" value={docFilter} onChange={value => { setDocFilter(value); setStatusFilter('ALL'); setVisibleCount(PAGE_SIZE); }} options={[
+          { id: 'ALL', label: 'Sales invoices' }, { id: 'CREDIT_NOTE', label: 'Sales returns' },
+        ]} />}
+        <div className={workspace.panel + ' space-y-2 p-3'}>
+          <label className="relative block">
+            <Search aria-hidden="true" size={17} className="pointer-events-none absolute left-3 top-3.5 text-muted-foreground" />
+            <input type="search" aria-label="Search bills" placeholder="Party or bill number" className={workspace.input + ' pl-9'} value={searchTerm} onChange={onSearchInput} />
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <WorkspaceFilters<'all' | 'today' | 'month'> label="Document period" value={dateFilter} onChange={setDateFilter} options={[
+              { id: 'all', label: 'All dates' }, { id: 'today', label: 'Today' }, { id: 'month', label: 'This month' },
+            ]} />
           </div>
-
-          {/* Voucher Type Pills */}
-          {!propInvoices && (
-            <div className="flex gap-2 mb-3 overflow-x-auto no-scrollbar py-1">
-              {([
-                { id: 'ALL', label: 'All Docs' },
-                { id: 'SALE', label: 'Sales' },
-                { id: 'QUOTATION', label: 'Quotations' },
-                { id: 'PROFORMA', label: 'Proforma' },
-                { id: 'DELIVERY_CHALLAN', label: 'Challans' },
-                { id: 'CREDIT_NOTE', label: 'Credit Notes' },
-                { id: 'PURCHASE_ORDER', label: 'PO' },
-                { id: 'DEBIT_NOTE', label: 'Debit Notes' },
-              ] as { id: VoucherType | 'ALL'; label: string }[]).map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setDocFilter(t.id)}
-                  className={`px-3.5 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider whitespace-nowrap border transition-all ${
-                    docFilter === t.id
-                      ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white'
-                      : 'bg-surface-container-low text-muted-foreground border-border'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="relative group">
-            <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-              <Search className="w-5 h-5 text-muted-foreground group-focus-within:text-google-blue transition-colors" />
-            </div>
-            <input
-              type="text"
-              placeholder="Search by client name or bill #"
-              className="w-full bg-surface-container-low border border-border rounded-[28px] pl-12 pr-4 py-4 outline-none text-sm font-semibold text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-google-blue/20 focus:border-google-blue transition-all shadow-sm"
-              value={searchTerm}
-              onChange={onSearchInput}
-            />
-          </div>
-
-          <div className="flex gap-2 mt-4 overflow-x-auto no-scrollbar py-1">
-            {['ALL', 'PAID', 'PENDING', 'OVERDUE'].map((status) => (
-              <button
-                key={status}
-                onClick={() => setStatusFilter(status as any)}
-                className={`px-5 py-2 rounded-2xl text-[10px] font-bold uppercase tracking-wider transition-all border shadow-sm whitespace-nowrap ${statusFilter === status
-                  ? 'bg-google-blue text-white border-google-blue shadow-google-blue/20'
-                  : 'bg-surface-container-low text-muted-foreground border-border hover:bg-surface-container-highest'
-                  }`}
-              >
-                {status === 'ALL' ? 'All' : status === 'OVERDUE' ? 'Overdue' : status}
-              </button>
-            ))}
-          </div>
+          {((title === 'Sales' && docFilter !== 'CREDIT_NOTE') || title === 'Purchases') && <WorkspaceFilters<PaymentFilter> label="Bill status" value={statusFilter} onChange={setStatusFilter} options={paymentFilters} />}
         </div>
-      </div>
-
-      <div className="max-w-5xl mx-auto w-full px-4 mt-4 space-y-3">
-        {visibleInvoices.map((invoice) => (
-          <InvoiceCard
-            key={invoice.id}
-            invoice={invoice}
-            onView={onView}
-            onDelete={handleDelete}
-            onMenuOpen={handleMenuOpen}
-            isLowEnd={IS_LOW_END}
-          />
-        ))}
-
-        {hasMore && (
-          <button
-            onClick={loadMore}
-            className="w-full py-4 bg-surface-container-low border border-border rounded-2xl text-sm font-bold text-muted-foreground hover:bg-surface-container-highest transition-colors flex items-center justify-center gap-2"
-          >
-            <ChevronRight className="w-4 h-4" />
-            Load More ({filteredInvoices.length - visibleCount} remaining)
-          </button>
-        )}
-
-        {filteredInvoices.length === 0 && (
-          <div className="text-center py-20">
-            <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
-              <FileText className="w-8 h-8 text-slate-300" />
-            </div>
-            <h3 className="text-slate-500 font-bold">No results</h3>
-            <p className="text-slate-400 text-xs mt-1">Adjust filters or search term</p>
-          </div>
-        )}
+        <div className="space-y-2" aria-label={title + ' documents'}>
+          {visibleInvoices.map(invoice => <InvoiceCard key={invoice.id} invoice={invoice} onView={onView} onMenuOpen={handleMenuOpen} />)}
+          {hasMore && <button type="button" onClick={loadMore} className={workspace.secondary + ' w-full'}>Load more <ChevronRight size={16} /></button>}
+          {!filteredInvoices.length && <div role="status" className={workspace.panel + ' p-10 text-center text-sm text-muted-foreground'}>No documents match these filters.</div>}
+        </div>
       </div>
 
       {/* Premium Bottom Action Sheet */}
@@ -533,7 +359,7 @@ const AllInvoices: React.FC<AllInvoicesProps> = ({
                 <div className="pt-2">
                   <button
                     onClick={() => {
-                      onDelete?.(selectedForAction);
+                      handleDelete(selectedForAction);
                       setSelectedForAction(null);
                     }}
                     className="w-full flex items-center gap-4 p-4 rounded-[24px] hover:bg-red-50 dark:hover:bg-red-900/10 transition-all group active:scale-[0.98]"
@@ -542,8 +368,7 @@ const AllInvoices: React.FC<AllInvoicesProps> = ({
                       <Trash2 className="w-6 h-6" />
                     </div>
                     <div className="flex-1 text-left min-w-0">
-                      <p className="font-bold text-red-600 text-base">Delete Permanently</p>
-                      <p className="text-xs text-red-400/80">Remove record forever</p>
+                      <p className="font-bold text-red-600 text-base">Delete document</p>
                     </div>
                     <ChevronRight className="w-5 h-5 text-red-200 group-hover:text-red-400 transition-colors" />
                   </button>
@@ -554,31 +379,12 @@ const AllInvoices: React.FC<AllInvoicesProps> = ({
         )}
       </AnimatePresence>
 
-      {onCreate && (
-        <motion.div
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          className="fixed bottom-24 right-4 z-40 md:bottom-8 md:right-8"
-        >
-          <button
-            onClick={() => {
-              HapticService.medium();
-              onCreate();
-            }}
-            className="h-14 px-5 bg-google-blue text-white rounded-[28px] shadow-lg shadow-google-blue/40 flex items-center gap-3 hover:scale-105 active:scale-95 transition-all"
-          >
-            <Plus className="w-6 h-6" />
-            <span className="font-bold text-sm tracking-tight">{createLabel}</span>
-          </button>
-        </motion.div>
-      )}
-
       <ConfirmationModal
         isOpen={!!invoiceToDelete}
         onClose={() => setInvoiceToDelete(null)}
         onConfirm={confirmDelete}
-        title="Delete Invoice?"
-        message="Are you sure you want to delete this invoice? This action cannot be undone."
+        title="Delete document?"
+        message="Remove this document from the active list?"
         confirmText="Delete"
         variant="danger"
       />

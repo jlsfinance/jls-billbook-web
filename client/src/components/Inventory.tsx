@@ -7,8 +7,6 @@ import {
   Package,
   Trash2,
   Edit2,
-  TrendingUp,
-  AlertTriangle,
   ScanLine,
   Copy,
   Check,
@@ -19,6 +17,7 @@ import BarcodeScanField from './BarcodeScanField';
 import StockHistoryDrawer from './StockHistoryDrawer';
 import { detectBarcodeFormat, isBarcodeStructurallyValid, normalizeBarcode, stockStateOf } from '../services/barcodeService';
 import { HapticService } from '../services/hapticService';
+import { WorkspaceFilters, WorkspaceHeading, WorkspaceMetrics, workspace, workspaceMoney } from './WorkspaceUI';
 
 interface InventoryProps {
   /** Opens the scan-first Stock In session owned by the parent shell. */
@@ -44,6 +43,7 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [stockFilter, setStockFilter] = useState<'all' | 'low' | 'unlinked'>('all');
   const [isAdding, setIsAdding] = useState(false);
   const [draft, setDraft] = useState<ProductDraft>(emptyDraft());
   const [originalId, setOriginalId] = useState<string | null>(null);
@@ -68,15 +68,16 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
     const matchingCategory = categoryFilter
       ? visibleProducts.filter(product => (product.category?.trim() || 'General') === categoryFilter)
       : visibleProducts;
-    if (!q) return matchingCategory;
+    const matchingStock = matchingCategory.filter(product => stockFilter === 'all' || (stockFilter === 'low' ? product.category?.toLowerCase() !== 'services' && stockStateOf(product) !== 'IN_STOCK' : !product.barcode || product.barcodeEnabled === false));
+    if (!q) return matchingStock;
     // Search matches name, category OR barcode (PRD §14).
-    return matchingCategory.filter(
+    return matchingStock.filter(
       p =>
         p.name.toLowerCase().includes(q) ||
         (p.category || '').toLowerCase().includes(q) ||
         (p.barcode || '').toLowerCase().includes(q)
     );
-  }, [visibleProducts, searchTerm, categoryFilter]);
+  }, [visibleProducts, searchTerm, categoryFilter, stockFilter]);
   const categories = [...new Set(visibleProducts.map(product => product.category?.trim() || 'General'))]
     .sort((a, b) => a.localeCompare(b));
 
@@ -85,7 +86,7 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
     [visibleProducts]
   );
   const lowStockCount = useMemo(
-    () => visibleProducts.filter(p => stockStateOf(p) !== 'IN_STOCK').length,
+    () => visibleProducts.filter(p => p.category?.toLowerCase() !== 'services' && stockStateOf(p) !== 'IN_STOCK').length,
     [visibleProducts]
   );
 
@@ -230,144 +231,42 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
   };
 
   return (
-    <div className="bg-surface-container-low min-h-[100dvh] pb-nav font-sans">
-      {/* Top bar */}
-      <div className="pt-safe pb-8 px-6 md:px-12 bg-surface-container-low sticky top-0 z-30 transition-all">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="flex flex-col">
-            <span className="text-[11px] font-black text-google-blue uppercase tracking-[0.3em] mb-2 px-1">Management</span>
-            <h1 className="text-4xl md:text-5xl font-black font-heading text-foreground tracking-tight leading-none">Inventory</h1>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            {selectedIds.size > 0 && (
-              <motion.button
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => removeProducts([...selectedIds])}
-                className="bg-google-red text-white px-6 py-4 rounded-full flex items-center justify-center gap-2 font-black text-sm uppercase tracking-widest shadow-lg"
-              >
-                <Trash2 className="w-5 h-5" /> Remove ({selectedIds.size})
-              </motion.button>
-            )}
-
-            {onOpenBarcodeLabels && (
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={onOpenBarcodeLabels}
-                className="bg-surface-container-highest text-foreground px-6 py-4 rounded-full flex items-center justify-center gap-2 font-black text-xs uppercase tracking-widest border border-border"
-              >
-                <ScanLine className="w-4 h-4 text-google-blue" /> Labels
-              </motion.button>
-            )}
-
-            {onOpenStockIn && (
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={onOpenStockIn}
-                className="bg-google-green text-white px-8 py-4 rounded-full flex items-center justify-center gap-3 font-black text-sm uppercase tracking-widest shadow-lg"
-              >
-                <ScanLine className="w-5 h-5" strokeWidth={3} /> Scan &amp; Add Stock
-              </motion.button>
-            )}
-
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={openCreate}
-              className="bg-primary text-white px-8 py-4 rounded-full flex items-center justify-center gap-3 font-black text-sm uppercase tracking-widest shadow-google"
-            >
-              <Plus className="w-5 h-5" strokeWidth={3} /> Add New Item
-            </motion.button>
-          </div>
-        </div>
-      </div>
-
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto p-4 md:p-8 space-y-8">
-        {/* Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-surface-container-high p-6 rounded-[32px] border border-border shadow-sm">
-            <div className="w-12 h-12 rounded-2xl bg-google-blue/10 flex items-center justify-center text-google-blue mb-4">
-              <Package className="w-6 h-6" />
-            </div>
-            <p className="text-3xl font-black text-foreground font-heading">{visibleProducts.length}</p>
-            <p className="text-[10px] uppercase font-black text-muted-foreground tracking-[0.2em] mt-1">Total Products</p>
-          </div>
-
-          <div className="bg-surface-container-high p-6 rounded-[32px] border border-border shadow-sm">
-            <div className="w-12 h-12 rounded-2xl bg-google-green/10 flex items-center justify-center text-google-green mb-4">
-              <TrendingUp className="w-6 h-6" />
-            </div>
-            <p className="text-3xl font-black text-foreground font-heading">₹{Math.round(totalStockValue).toLocaleString('en-IN')}</p>
-            <p className="text-[10px] uppercase font-black text-muted-foreground tracking-[0.2em] mt-1">Inventory Value</p>
-          </div>
-
-          <div className="bg-surface-container-high p-6 rounded-[32px] border border-border shadow-sm">
-            <div className="w-12 h-12 rounded-2xl bg-google-blue/10 flex items-center justify-center text-google-blue mb-4">
-              <ScanLine className="w-6 h-6" />
-            </div>
-            <p className="text-3xl font-black text-foreground font-heading">
-              {visibleProducts.filter(p => !!p.barcode).length}
-            </p>
-            <p className="text-[10px] uppercase font-black text-muted-foreground tracking-[0.2em] mt-1">Barcode Enabled</p>
-          </div>
-
-          <div
-            className={`p-6 rounded-[32px] border transition-all h-full ${
-              lowStockCount > 0 ? 'bg-google-red/5 border-google-red/10 text-google-red' : 'bg-surface-container-high border-border text-foreground'
-            }`}
-          >
-            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-4 ${lowStockCount > 0 ? 'bg-google-red/10' : 'bg-surface-container-highest'}`}>
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-            <p className="text-3xl font-black font-heading">{lowStockCount}</p>
-            <p className={`text-[10px] uppercase font-black tracking-[0.2em] mt-1 ${lowStockCount > 0 ? 'text-google-red' : 'text-muted-foreground'}`}>
-              Low / Out of Stock
-            </p>
-          </div>
-        </div>
-
-        {/* Search */}
-        <div className="flex flex-wrap gap-3 items-center">
-          <div className="relative group flex-1">
-            <div className="absolute left-6 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-google-blue transition-colors">
-              <Search className="w-6 h-6" />
-            </div>
-            <input
-              type="text"
-              placeholder="Search by name, category or barcode…"
-              className="w-full pl-16 pr-8 py-6 bg-surface-container-high border-2 border-transparent focus:border-google-blue/20 rounded-[32px] shadow-sm outline-none font-bold text-foreground transition-all placeholder:text-muted-foreground/40"
-              value={searchTerm}
-              onChange={e => { setSearchTerm(e.target.value); setSelectedIds(new Set()); }}
-            />
-          </div>
-          <select aria-label="Item category" value={categoryFilter} onChange={event => {
-            setCategoryFilter(event.target.value);
-            setSelectedIds(new Set());
-          }} className="max-w-full rounded-2xl border bg-background px-3 py-3 text-sm font-medium">
+    <div className="min-h-[100dvh] bg-surface-container-low">
+      <div className={workspace.page}>
+        <WorkspaceHeading title="Inventory" actions={<>
+          {onOpenBarcodeLabels && <button type="button" onClick={onOpenBarcodeLabels} className={workspace.secondary}><ScanLine size={16} /> Labels</button>}
+          {onOpenStockIn && <button type="button" onClick={onOpenStockIn} className={workspace.secondary}>Stock in</button>}
+          <button type="button" onClick={openCreate} className={workspace.primary}><Plus size={16} /> Add item</button>
+        </>} />
+        <WorkspaceMetrics values={[
+          { label: 'Items', value: visibleProducts.length },
+          { label: 'Stock at selling price', value: workspaceMoney(totalStockValue) },
+          { label: 'Active barcodes', value: visibleProducts.filter(product => product.barcode && product.barcodeEnabled !== false).length },
+          { label: 'Low or out of stock', value: lowStockCount, tone: lowStockCount ? 'attention' : undefined },
+        ]} />
+        <div className="flex flex-wrap gap-2">
+          <label className="relative min-w-[150px] flex-1">
+            <Search aria-hidden="true" size={17} className="pointer-events-none absolute left-3 top-3.5 text-muted-foreground" />
+            <input type="search" aria-label="Search inventory" placeholder="Item, category or barcode" value={searchTerm} onChange={event => { setSearchTerm(event.target.value); setSelectedIds(new Set()); }} className={workspace.input + ' pl-9'} />
+          </label>
+          <select aria-label="Item category" value={categoryFilter} onChange={event => { setCategoryFilter(event.target.value); setSelectedIds(new Set()); }} className={workspace.input + ' w-auto max-w-full'}>
             <option value="">All item categories</option>
             {categoryFilter && !categories.includes(categoryFilter) && <option value={categoryFilter}>{categoryFilter}</option>}
             {categories.map(category => <option key={category} value={category}>{category}</option>)}
           </select>
-          {filteredProducts.length > 0 && (
-            <button
-              onClick={handleSelectAll}
-              className={`px-6 py-6 rounded-[32px] border-2 font-black text-sm uppercase tracking-widest transition-all ${
-                selectedIds.size === filteredProducts.length && filteredProducts.length > 0
-                  ? 'bg-google-blue text-white border-google-blue'
-                  : 'bg-surface-container-high border-transparent text-muted-foreground'
-              }`}
-            >
-              {selectedIds.size === filteredProducts.length && filteredProducts.length > 0 ? 'Deselect All' : 'Select All'}
-            </button>
-          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <WorkspaceFilters label="Stock status" value={stockFilter} onChange={value => { setStockFilter(value); setSelectedIds(new Set()); }} options={[
+            { id: 'all', label: 'All items' }, { id: 'low', label: 'Low stock' }, { id: 'unlinked', label: 'No active barcode' },
+          ]} />
+          <div className="flex flex-wrap gap-2">
+            {filteredProducts.length > 0 && <button type="button" onClick={handleSelectAll} className={workspace.secondary}>{selectedIds.size === filteredProducts.length ? 'Deselect all' : 'Select all'}</button>}
+            {selectedIds.size > 0 && <button type="button" onClick={() => removeProducts([...selectedIds])} className={workspace.secondary + ' text-red-700 dark:text-red-300'}><Trash2 size={16} /> Remove ({selectedIds.size})</button>}
+          </div>
         </div>
 
         {/* Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 xl:grid-cols-3">
           <AnimatePresence mode="popLayout">
             {filteredProducts.map(product => {
               const state = stockStateOf(product);
@@ -378,7 +277,7 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.9 }}
-                  className={`bg-surface border p-6 rounded-[32px] shadow-sm hover:shadow-google-lg transition-all group relative overflow-hidden ${
+                  className={`bg-surface border p-3 sm:p-4 rounded-2xl transition-all group relative overflow-hidden ${
                     selectedIds.has(product.id)
                       ? 'border-google-blue ring-2 ring-google-blue/20 bg-google-blue/5'
                       : 'border-border hover:border-google-blue/20'
@@ -398,10 +297,8 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
                     </button>
                   </div>
 
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-google-blue/5 rounded-full -mr-16 -mt-16 blur-2xl" />
-
                   <div className="flex justify-between items-start mb-4 relative pl-8">
-                    <div className="w-14 h-14 rounded-2xl bg-surface-container-high flex items-center justify-center text-google-blue shadow-inner">
+                    <div className="w-10 h-10 rounded-xl bg-surface-container-high flex items-center justify-center text-google-blue">
                       <Package className="w-7 h-7" />
                     </div>
                     <div className="flex gap-1">
@@ -423,7 +320,9 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
                   </div>
 
                   <div className="relative">
-                    <h3 className="text-xl font-black text-foreground line-clamp-1 font-heading mb-1">{product.name}</h3>
+                    <h3 className="mb-1 font-heading text-base font-semibold text-foreground">
+                      <button type="button" onClick={() => setDrawerProduct(product)} className="block max-w-full truncate text-left hover:underline">{product.name}</button>
+                    </h3>
                     <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em]">{product.category}</p>
                   </div>
 
@@ -453,7 +352,7 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
                     )}
                   </div>
 
-                  <div className="mt-6 pt-5 border-t border-border flex items-end justify-between">
+                  <div className="mt-3 pt-3 border-t border-border flex items-end justify-between">
                     <div>
                       <p className="text-[9px] font-black text-muted-foreground uppercase tracking-widest mb-1">Unit Price</p>
                       <p className="text-2xl font-black text-google-blue tracking-tighter">
@@ -481,20 +380,10 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
           </AnimatePresence>
         </div>
 
-        {filteredProducts.length === 0 && (
-          <div className="text-center py-24 bg-surface-container-high/50 rounded-[40px] border-2 border-dashed border-border mt-8">
-            <div className="w-24 h-24 bg-surface-container-highest rounded-full flex items-center justify-center mx-auto mb-6">
-              <Package className="w-12 h-12 text-muted-foreground/30" strokeWidth={1.5} />
-            </div>
-            <h3 className="text-2xl font-black text-foreground mb-2 font-heading">
-              {searchTerm ? 'Kuch nahi mila' : 'Empty Warehouse'}
-            </h3>
-            <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest">
-              {searchTerm ? 'Doosra naam ya barcode try karein' : 'Scan karke ya manually pehla item add karein'}
-            </p>
-          </div>
-        )}
-      </motion.div>
+        {filteredProducts.length === 0 && <div role="status" className={workspace.panel + ' p-10 text-center text-sm text-muted-foreground'}>
+          {visibleProducts.length ? 'No items match these filters.' : 'Add an item or scan stock to get started.'}
+        </div>}
+      </div>
 
       {/* Product modal */}
       <AnimatePresence>

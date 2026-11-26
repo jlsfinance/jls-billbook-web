@@ -5,13 +5,14 @@ import { StorageService } from '../services/storageService';
 import { Plus, Trash2, Save, X, CreditCard, Banknote, ArrowLeft, AlertCircle, Calculator, Package, UserPlus, User, Phone, ChevronRight, ChevronDown, Truck } from 'lucide-react';
 import Autocomplete from './Autocomplete';
 import { useCompany } from '@/contexts/CompanyContext';
-import { motion, AnimatePresence, useScroll, useMotionValueEvent } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { HapticService } from '@/services/hapticService';
 import { SoundService } from '@/services/soundService';
 import { ContactsService } from '@/services/contactsService';
 import VoiceInput from './VoiceInput';
 import { ParsedItem } from '../services/voiceParser';
 import BarcodeScanField from './BarcodeScanField';
+import { workspace, workspaceMoney } from './WorkspaceUI';
 import { lookupBarcode } from '../services/barcodeService';
 import type { BarcodeSource } from '../services/barcodeService';
 
@@ -1108,15 +1109,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
     onSave(invoiceData);
   };
 
-  const { scrollY } = useScroll();
-  const [isScrolled, setIsScrolled] = useState(false);
-
-  useMotionValueEvent(scrollY, "change", (latest: number) => {
-    setIsScrolled(latest > 50);
-  });
-
   return (
-    <div className="bg-background min-h-screen pb-48 font-sans">
+    <div className="min-h-screen bg-surface-container-low pb-32 font-sans">
       {/* Edit Warning Modal */}
       {showEditWarning && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] p-4">
@@ -1134,18 +1128,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
         </div>
       )}
 
-      {/* Top App Bar/Header - Google Activity Style */}
-      <motion.div
-        className={`sticky top-0 pt-safe z-30 ${isScrolled
-          ? 'bg-background border-b border-border shadow-sm'
-          : 'bg-background border-b border-transparent'
-          }`}
-      >
-        <div className="flex items-center justify-between px-4 h-16 max-w-5xl mx-auto">
-          <button onClick={onCancel} className="p-2 -ml-2 rounded-full hover:bg-surface-container-highest transition-colors">
-            <ArrowLeft className="w-6 h-6 text-foreground" />
-          </button>
-          <div className="flex-1 ml-4 overflow-hidden">
+      <header className="sticky top-0 z-30 border-b border-border bg-surface">
+        <div className="mx-auto flex min-h-16 max-w-5xl items-center gap-3 px-4">
+          <button type="button" aria-label="Back" onClick={onCancel} className={workspace.secondary + ' w-11 shrink-0 !px-0'}><ArrowLeft size={19} /></button>
+          <div className="min-w-0 flex-1">
             <h1 className="text-xl font-bold text-foreground tracking-tight truncate">
               {({
                 QUOTATION: initialInvoice ? 'Edit Quotation' : 'New Quotation',
@@ -1162,23 +1148,12 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
               {getInvoiceNumberPreview()}
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={handleSubmit}
-              className="bg-google-blue text-white px-6 py-2.5 rounded-full font-bold shadow-lg shadow-google-blue/20 flex items-center gap-2 hover:shadow-google transition-all"
-            >
-              <Save className="w-5 h-5" />
-              <span>Save</span>
-            </motion.button>
-          </div>
         </div>
-      </motion.div>
+      </header>
 
       <div className="max-w-5xl mx-auto space-y-3 pt-3 px-3">
         {/* Customer Section - Compact */}
-        <div className="bg-surface-container p-4 rounded-2xl border border-border shadow-sm">
+        <div className={workspace.panel + ' p-4'}>
           <div className="flex items-center gap-2 mb-3">
             <div className="w-8 h-8 rounded-xl bg-google-blue/10 flex items-center justify-center text-google-blue">
               <UserPlus className="w-4 h-4" />
@@ -1291,10 +1266,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
         <div className="space-y-2 pt-2">
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-3">
-              <h2 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Items</h2>
+              <h2 className="text-base font-semibold text-foreground">Items</h2>
               <VoiceInput onItemsParsed={handleVoiceItems} />
             </div>
-            <button onClick={handleAddItem} className="text-[10px] font-bold text-google-blue uppercase bg-google-blue/10 px-3 py-1.5 rounded-full">+ Add</button>
+            <button type="button" onClick={handleAddItemAndOpen} className={workspace.secondary}><Plus size={16} /> Add item</button>
           </div>
 
           {/* Always-visible scan surface: hardware scanner + camera (PRD §14) */}
@@ -1360,7 +1335,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95 }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={'Edit line ' + item.description}
                   onClick={() => handleOpenItemModal(items.indexOf(item))}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      handleOpenItemModal(items.indexOf(item));
+                    }
+                  }}
                   className="bg-surface-container p-3 rounded-xl border border-border flex gap-3 items-center active:scale-[0.98] transition-all cursor-pointer"
                 >
                   <div className="w-10 h-10 rounded-full bg-google-blue/10 flex items-center justify-center text-google-blue shrink-0">
@@ -1381,13 +1365,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
             </AnimatePresence>
           </div>
 
-          <button
-            onClick={handleAddItemAndOpen}
-            className="w-full py-4 rounded-xl border-2 border-dashed border-blue-200 dark:border-slate-700 bg-blue-50/30 dark:bg-slate-900/40 text-blue-600 dark:text-blue-400 font-bold flex items-center justify-center gap-2 hover:bg-blue-50 transition-all active:scale-[0.98] text-sm"
-          >
-            <Plus className="w-5 h-5" />
-            <span>Add Item</span>
-          </button>
+          {!billItems.length && <p className="px-1 py-3 text-sm text-muted-foreground">Scan a barcode or choose Add item to start.</p>}
         </div>
 
       </div>
@@ -1655,30 +1633,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
         </div>
       </div>
 
-      {/* Floating Save Bar - Animated on Scroll */}
-      <motion.div
-        initial={{ y: 0 }}
-        animate={{
-          y: isScrolled ? 0 : 0,
-          scale: isScrolled ? 0.98 : 1,
-          opacity: 1
-        }}
-        className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-900/90 backdrop-blur-md border-t border-slate-200 dark:border-slate-700 p-4 pb-6 md:pb-4 z-30 shadow-[0_-5px_30px_rgba(0,0,0,0.1)]"
-      >
-        <div className="max-w-5xl mx-auto flex justify-between items-center px-4">
-          <div className="flex flex-col">
-            <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Total Payable</span>
-            <span className="text-3xl font-black text-blue-600 tracking-tighter">
-              ₹{calculateRoundedTotal().toLocaleString('en-IN')}
-            </span>
-          </div>
-          <div className="text-xs font-bold text-slate-400">
-            {billItems.length} {billItems.length === 1 ? 'Item' : 'Items'} Added
-          </div>
+      <section aria-label="Bill discount" className="mx-auto max-w-5xl px-3 pb-3">
+        <div className={workspace.panel + ' grid grid-cols-[1fr_auto_auto] items-center gap-2 p-3'}>
+          <label htmlFor="bill-discount" className="text-sm font-semibold">Bill discount</label>
+          <select aria-label="Discount type" value={discountType} onChange={event => { setDiscountType(event.target.value as 'PERCENTAGE' | 'AMOUNT'); setHasChanges(true); }} className={workspace.input + ' w-auto'}>
+            <option value="PERCENTAGE">%</option><option value="AMOUNT">₹</option>
+          </select>
+          <input id="bill-discount" type="number" min="0" value={discountValue} onChange={event => { setDiscountValue(Number(event.target.value)); setHasChanges(true); }} className={workspace.input + ' w-20'} />
         </div>
-      </motion.div>
-
-
+      </section>
 
       {/* Smart Calculator Modal */}
       {
@@ -2078,44 +2041,15 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
         )
       }
 
-      {/* Sticky Bottom Summary Bar - Google Premium Style */}
-      <div className="fixed bottom-0 left-0 right-0 bg-surface-container/80 backdrop-blur-xl border-t border-border z-40 pb-safe">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-none mb-1">Total Payable</p>
-            <p className="text-3xl font-bold font-heading text-foreground">
-              ₹{calculateRoundedTotal().toLocaleString('en-IN')}
-            </p>
-            {/* Discount Input for Full Bill */}
-            <div className="flex items-center gap-2 mt-2">
-              <select
-                value={discountType}
-                onChange={(e) => setDiscountType(e.target.value as 'PERCENTAGE' | 'AMOUNT')}
-                className="bg-slate-100 dark:bg-slate-800 text-[10px] font-bold p-1 rounded"
-              >
-                <option value="PERCENTAGE">%</option>
-                <option value="AMOUNT">₹</option>
-              </select>
-              <input
-                type="number"
-                value={discountValue}
-                onChange={(e) => setDiscountValue(Number(e.target.value))}
-                placeholder="Disc."
-                className="w-16 bg-slate-100 dark:bg-slate-800 text-xs font-bold p-1 rounded border border-transparent focus:border-google-blue outline-none"
-              />
-            </div>
+      <footer className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <div className="mx-auto flex min-h-16 max-w-5xl items-center justify-between gap-3 px-4 py-2">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">Total payable · {billItems.length} {billItems.length === 1 ? 'item' : 'items'}</p>
+            <p className="text-xl font-bold tabular-nums">{workspaceMoney(calculateRoundedTotal())}</p>
           </div>
-          <div className="text-right">
-            <div className="flex items-center gap-2 mb-1 justify-end">
-              <span className="w-2 h-2 rounded-full bg-google-green" />
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{items.filter(i => i.productId).length} Items Added</span>
-            </div>
-            <p className="text-[11px] font-bold text-google-blue">
-              {roundUpTo > 0 ? 'Rounded Off' : 'Exact Amount'}
-            </p>
-          </div>
+          <button type="button" onClick={handleSubmit} className={workspace.primary + ' shrink-0'}><Save size={17} /> Save</button>
         </div>
-      </div>
+      </footer>
 
     </div >
   );
