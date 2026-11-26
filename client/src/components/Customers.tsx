@@ -7,7 +7,7 @@ import { AlertModal } from '@/components/AlertModal';
 import { Customer, Invoice, Payment } from '../types';
 import { StorageService } from '../services/storageService';
 import { WhatsAppService } from '../services/whatsappService';
-import { Search, Phone, Mail, MapPin, ArrowLeft, Download, TrendingUp, Eye, X, Banknote, MessageCircle, Edit, Trash2, Plus, ChevronRight } from 'lucide-react';
+import { Search, ArrowLeft, Download, X, MessageCircle, Edit, Trash2, Plus, ChevronRight } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -16,7 +16,9 @@ import InvoiceView from './InvoiceView';
 import { HapticService } from '@/services/hapticService';
 import { ContactsService } from '@/services/contactsService';
 import { formatDate } from '../utils/dateUtils';
-import { buildPartyLedger, inReportRange, localDay } from '../services/businessReports';
+import { buildPartyLedger, localDay } from '../services/businessReports';
+import PartyDateRange, { type PartyRange } from './PartyDateRange';
+import PartyLedgerPanel, { isLedgerDebit, type PartyLedgerRow } from './PartyLedgerPanel';
 import { WorkspaceFilters, WorkspaceHeading, WorkspaceMetrics, workspace, workspaceMoney } from './WorkspaceUI';
 
 interface CustomersProps {
@@ -26,16 +28,7 @@ interface CustomersProps {
   initialCustomerId?: string;
 }
 
-interface Transaction {
-  id: string;
-  date: string;
-  type: 'INVOICE' | 'PAYMENT' | 'CREDIT_NOTE';
-  reference: string; // Invoice # or Payment Ref
-  amount: number;
-  status?: string; // For invoices
-  mode?: string; // For payments or invoice mode
-  data: Invoice | Payment;
-}
+const partyAction = 'grid h-10 w-10 shrink-0 place-items-center rounded-full border border-border/30 bg-surface-container-high hover:bg-surface-container-highest focus-visible:ring-2 focus-visible:ring-primary/50';
 
 const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWorkspace, initialCustomerId }) => {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -48,8 +41,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
     }
     return null;
   });
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [activeTab, setActiveTab] = useState<'HISTORY' | 'STATEMENT' | 'NOTIFICATIONS'>('HISTORY');
+  const [activeTab, setActiveTab] = useState<'TRANSACTIONS' | 'PROFILE'>('TRANSACTIONS');
 
   // Invoice Viewing State
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
@@ -58,20 +50,18 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [showNoteModal, setShowNoteModal] = useState(false);
-  const [pendingShareTx, setPendingShareTx] = useState<Transaction | null>(null);
+  const [pendingShareTx, setPendingShareTx] = useState<PartyLedgerRow['record'] | null>(null);
 
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentMode, setPaymentMode] = useState<'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE'>('CASH');
   const [paymentNote, setPaymentNote] = useState('');
 
-  // Statement State
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-
-  // History Date Filter State
-  const [historyFromDate, setHistoryFromDate] = useState('');
-  const [historyToDate, setHistoryToDate] = useState('');
+  const [range, setRange] = useState<PartyRange>(() => {
+    const now = new Date();
+    return { from: localDay(new Date(now.getFullYear(), now.getMonth(), 1)),
+      to: localDay(new Date(now.getFullYear(), now.getMonth() + 1, 0)) };
+  });
 
   // Add Customer Modal State
   const [showAddCustomer, setShowAddCustomer] = useState(false);
@@ -129,62 +119,11 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
 
   useEffect(() => {
     setCustomers(StorageService.getCustomers());
-    // Set default date range for statement (current month)
-    const now = new Date();
-    const firstDay = localDay(new Date(now.getFullYear(), now.getMonth(), 1));
-    const lastDay = localDay(new Date(now.getFullYear(), now.getMonth() + 1, 0));
-    setStartDate(firstDay);
-    setEndDate(lastDay);
-
-    // Set history date filter to show all by default (last 1 year)
-    const oneYearAgo = localDay(new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()));
-    setHistoryFromDate(oneYearAgo);
-    setHistoryToDate(lastDay);
   }, []);
-
-  // Load history whenever selected customer changes
-  useEffect(() => {
-    if (selectedCustomer) {
-      const allInvoices = StorageService.getInvoices();
-      const allPayments = StorageService.getPayments();
-
-      // Filter for this customer
-      const custInvoices = allInvoices.filter(inv => inv.customerId === selectedCustomer.id);
-      const custPayments = allPayments.filter(pay => pay.customerId === selectedCustomer.id);
-
-      // Combine into Transactions
-      const txs: Transaction[] = [
-        ...custInvoices.map(inv => ({
-          id: inv.id,
-          date: inv.date,
-          type: (inv.type === 'CREDIT_NOTE' ? 'CREDIT_NOTE' : 'INVOICE') as 'INVOICE' | 'CREDIT_NOTE',
-          reference: inv.invoiceNumber,
-          amount: inv.total,
-          status: inv.status,
-          mode: inv.status === 'PAID' ? 'CASH' : 'CREDIT',
-          data: inv
-        })),
-        ...custPayments.map(pay => ({
-          id: pay.id,
-          date: pay.date,
-          type: 'PAYMENT' as const,
-          reference: pay.reference || 'Payment',
-          amount: pay.amount,
-          mode: pay.mode,
-          data: pay
-        }))
-      ];
-
-      // Sort descending
-      txs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-      setTransactions(txs);
-      setActiveTab('HISTORY');
-    }
-  }, [selectedCustomer]);
 
   const handleViewHistory = (customer: Customer) => {
     setSelectedCustomer(customer);
+    setActiveTab('TRANSACTIONS');
   };
 
   const handleSavePayment = (e: React.FormEvent) => {
@@ -202,6 +141,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
       customerId: selectedCustomer.id,
       date: paymentDate,
       amount: amount,
+      type: selectedCustomer.balance < 0 ? 'PAID' : 'RECEIVED',
       mode: paymentMode,
       note: paymentNote,
       reference: 'PAY-' + Date.now().toString().slice(-6)
@@ -214,11 +154,11 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
     setCustomers(updatedCustomers);
     const updatedSel = updatedCustomers.find(c => c.id === selectedCustomer.id) || null;
     setSelectedCustomer(updatedSel);
-    if (updatedSel) handleViewHistory(updatedSel); // Refresh list
+
 
     // Show Success Modal via Alert? No, just close. Or Toast. 
     // User requested "Pop up redesign".
-    showAlert('Payment Recorded', `Received ₹${amount} from ${selectedCustomer.company}`, 'success');
+    showAlert('Payment Recorded', `₹${amount} ${payment.type === 'PAID' ? 'paid to' : 'received from'} ${selectedCustomer.company || selectedCustomer.name}`, 'success');
 
     setShowPaymentModal(false);
     setPaymentAmount('');
@@ -226,15 +166,15 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
     setPaymentMode('CASH');
   };
 
-  const handleShare = (tx: Transaction) => {
+  const handleShare = (tx: PartyLedgerRow['record']) => {
     if (!selectedCustomer) return;
     const company = StorageService.getCompanyProfile();
 
     if (selectedCustomer.phone) {
-      if (tx.type === 'INVOICE') {
-        WhatsAppService.shareInvoice(tx.data as Invoice, selectedCustomer, company);
+      if (tx.kind === 'voucher') {
+        WhatsAppService.shareInvoice(tx.data, selectedCustomer, company);
       } else {
-        WhatsAppService.sharePayment(tx.data as Payment, selectedCustomer, company);
+        WhatsAppService.sharePayment(tx.data, selectedCustomer, company);
       }
     } else {
       setPendingShareTx(tx);
@@ -276,7 +216,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
 
     const company = StorageService.getCompanyProfile();
 
-    const ledger = readStatement(selectedCustomer, startDate, endDate);
+    const ledger = readStatement(selectedCustomer, range.from, range.to);
     if (!ledger) return;
 
     const doc = new jsPDF();
@@ -290,7 +230,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
     // Details
     doc.setFontSize(10);
     doc.text(`Customer: ${selectedCustomer.company} `, 14, 50);
-    doc.text(`Period: ${formatDate(startDate)} to ${formatDate(endDate)} `, 14, 56);
+    doc.text(`Period: ${formatDate(range.from)} to ${formatDate(range.to)} `, 14, 56);
 
     // Table Header
     let y = 70;
@@ -307,7 +247,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
 
     const formatBalance = (balance: number) => Math.abs(balance).toFixed(2) + (balance > 0 ? ' Dr.' : balance < 0 ? ' Cr.' : '');
     doc.setFont('helvetica', 'bold');
-    doc.text(formatDate(startDate), 16, y);
+    doc.text(formatDate(range.from), 16, y);
     doc.text('Opening Balance', 45, y);
     doc.text(formatBalance(ledger.opening), ledger.opening < 0 ? 160 : 130, y, { align: 'right' });
     doc.setFont('helvetica', 'normal');
@@ -336,7 +276,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
     doc.text(formatBalance(ledger.closing), 160, y, { align: 'right' });
 
     // Unified Save/Share Logic
-    const fileName = `Statement_${selectedCustomer.name.replace(/[^a-zA-Z0-9]/g, '_')}_${startDate}.pdf`;
+    const fileName = `Statement_${selectedCustomer.name.replace(/[^a-zA-Z0-9]/g, '_')}_${range.from}.pdf`;
     if (Capacitor.isNativePlatform()) {
       try {
         const pdfBase64 = doc.output('datauristring').split(',')[1];
@@ -360,13 +300,13 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
     }
   };
 
-  const handleDownloadHistoryStatement = async () => {
+  const handleDownloadHistoryStatement = async (share = false) => {
     if (!selectedCustomer) return;
 
     const company = StorageService.getCompanyProfile();
     const todayDate = formatDate(new Date());
 
-    const ledger = readStatement(selectedCustomer, historyFromDate, historyToDate);
+    const ledger = readStatement(selectedCustomer, range.from, range.to);
     if (!ledger) return;
 
     const doc = new jsPDF('p', 'mm', 'a4');
@@ -389,7 +329,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
 
     y += 6;
     doc.setFontSize(9);
-    doc.text(`Period: ${historyFromDate} to ${historyToDate}`, pageWidth / 2, y, { align: 'center' });
+    doc.text(`Period: ${range.from} to ${range.to}`, pageWidth / 2, y, { align: 'center' });
 
     y += 8;
     // Horizontal line
@@ -439,8 +379,8 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
 
     y += 5;
 
-    const debitRows = ledger.rows.filter(row => row.delta > 0 || (row.delta === 0 && row.direction > 0));
-    const creditRows = ledger.rows.filter(row => row.delta < 0 || (row.delta === 0 && row.direction < 0));
+    const debitRows = ledger.rows.filter(isLedgerDebit);
+    const creditRows = ledger.rows.filter(row => !isLedgerDebit(row));
     const startY = y;
     const drawEntry = (date: string, particulars: string, amount: number, credit: boolean, status = '') => {
       const x = credit ? centerX : margin;
@@ -454,7 +394,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     const openingLabel = ledger.opening > 0 ? 'Opening Balance (Dr.)' : ledger.opening < 0 ? 'Opening Balance (Cr.)' : 'Opening Balance';
-    drawEntry(historyFromDate, openingLabel, Math.abs(ledger.opening), ledger.opening < 0);
+    drawEntry(range.from, openingLabel, Math.abs(ledger.opening), ledger.opening < 0);
     y += 6;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
@@ -577,415 +517,20 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
         alert('Could not share PDF. Please check permissions.');
       }
     } else {
+      if (share) {
+        const file = new File([doc.output('blob')], fileName, { type: 'application/pdf' });
+        try {
+          if (navigator.share && navigator.canShare?.({ files: [file] })) {
+            await navigator.share({ files: [file], title: 'Party ledger' });
+            return;
+          }
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') return;
+        }
+      }
       doc.save(fileName);
     }
   };
-
-  if (selectedCustomer) {
-    // Filter transactions by history date range
-    const filteredHistoryTransactions = transactions.filter(tx =>
-      inReportRange(tx.date, historyFromDate, historyToDate)
-    );
-
-    return (
-      <div className="bg-surface-container-low min-h-screen font-sans">
-        {/* Overlay for viewing invoice */}
-        <AnimatePresence>
-          {viewingInvoice && (
-            <motion.div
-              initial={{ opacity: 0, y: 50 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 50 }}
-              className="fixed inset-0 z-[60] bg-surface overflow-y-auto"
-            >
-              <InvoiceView
-                invoice={viewingInvoice}
-                onBack={() => setViewingInvoice(null)}
-                onEdit={(inv) => {
-                  setViewingInvoice(null);
-                  if (onEditInvoice) onEditInvoice(inv);
-                }}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-8">
-          {/* Top Navigation */}
-          <div className="flex items-center gap-4 pt-safe">
-            <motion.button
-              whileTap={{ scale: 0.9 }}
-              onClick={() => {
-                if (initialCustomerId && onBack) {
-                  onBack();
-                } else {
-                  setSelectedCustomer(null);
-                }
-              }}
-              className="w-12 h-12 rounded-full bg-surface-container-high flex items-center justify-center text-foreground hover:bg-surface-container-highest transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </motion.button>
-            <h2 className="text-lg font-semibold text-foreground">Party details</h2>
-          </div>
-
-          {/* Expressive Profile Card */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-surface rounded-[40px] shadow-sm border border-border p-8 relative overflow-hidden"
-          >
-            <div className="absolute top-0 right-0 w-64 h-64 bg-surface-container-high/50 rounded-full -mr-20 -mt-20 blur-3xl pointer-events-none" />
-
-            <div className="flex flex-col lg:flex-row justify-between items-start gap-8 relative">
-              <div className="flex-1 space-y-6">
-                <div>
-                  <div className="flex items-center gap-4 mb-2">
-                    <div className="w-16 h-16 rounded-[24px] bg-google-blue/10 flex items-center justify-center text-google-blue font-black text-3xl shadow-inner">
-                      {(selectedCustomer.company || selectedCustomer.name || 'Party').charAt(0)}
-                    </div>
-                    <div>
-                      <h1 className="text-3xl md:text-4xl font-black font-heading text-foreground tracking-tight leading-none">{selectedCustomer.company || selectedCustomer.name}</h1>
-                      <div className="flex items-center gap-3 mt-2">
-                        <span className="text-sm font-bold text-muted-foreground">{selectedCustomer.name}</span>
-                        <span className="w-1 h-1 rounded-full bg-border" />
-                        <div
-                          className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 ${(StorageService.getCustomerBehaviorScore(selectedCustomer.id)) > 80 ? 'bg-google-green/10 text-google-green' :
-                            (StorageService.getCustomerBehaviorScore(selectedCustomer.id)) > 50 ? 'bg-orange-100 text-orange-700' : 'bg-google-red/10 text-google-red'
-                            } `}
-                        >
-                          Trust Score: {StorageService.getCustomerBehaviorScore(selectedCustomer.id)}%
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-4">
-                  <div className="flex items-center gap-3 px-4 py-2 bg-surface-container-high rounded-full border border-border">
-                    <Mail className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-xs font-bold text-foreground">{selectedCustomer.email}</span>
-                  </div>
-                  <div className="flex items-center gap-3 px-4 py-2 bg-surface-container-high rounded-full border border-border">
-                    <Phone className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-xs font-bold text-foreground">{selectedCustomer.phone}</span>
-                  </div>
-                  <div className="flex items-center gap-3 px-4 py-2 bg-surface-container-high rounded-full border border-border">
-                    <MapPin className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-xs font-bold text-foreground line-clamp-1 max-w-[200px]">{selectedCustomer.address}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-col items-end gap-6 w-full lg:w-auto">
-                <div className="bg-surface-container-high/50 p-6 rounded-[32px] text-right min-w-[220px] border border-border">
-                  <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] mb-1">Outstanding Balance</p>
-                  <p className={`text-4xl font-black tracking-tighter ${selectedCustomer.balance > 0 ? 'text-google-red' : 'text-google-green'} `}>
-                    ₹{selectedCustomer.balance.toLocaleString()}
-                  </p>
-                </div>
-
-                <div className="flex gap-3 w-full justify-end">
-                  <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => setShowNoteModal(true)}
-                    className="px-6 py-3 bg-surface-container-highest rounded-full text-foreground text-sm font-bold flex items-center gap-2 hover:bg-surface-container-high transition-colors"
-                  >
-                    <MessageCircle className="w-4 h-4" /> Log Call
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => setShowPaymentModal(true)}
-                    className="px-8 py-3 bg-google-blue text-white rounded-full text-sm font-black uppercase tracking-wide shadow-lg shadow-google-blue/20 flex items-center gap-2"
-                  >
-                    <Banknote className="w-4 h-4" /> Receive Payment
-                  </motion.button>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Expressive Tabs */}
-          <div className="flex gap-2 mb-6 bg-surface-container-high/50 p-1.5 rounded-full w-fit border border-border">
-            {['HISTORY', 'STATEMENT', 'NOTIFICATIONS'].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab as any)}
-                className={`px-6 py-3 rounded-full text-xs font-black uppercase tracking-widest transition-all ${activeTab === tab
-                  ? 'bg-google-blue text-white shadow-md'
-                  : 'text-muted-foreground hover:bg-surface-container-highest hover:text-foreground'
-                  } `}
-              >
-                {tab === 'HISTORY' ? 'History' : tab === 'STATEMENT' ? 'Statement' : 'Activity'}
-              </button>
-            ))}
-          </div>
-
-          {/* Tab Content Area */}
-          <div className="bg-surface rounded-[40px] shadow-sm border border-border overflow-hidden min-h-[400px]">
-            <AnimatePresence mode="wait">
-              {activeTab === 'HISTORY' && (
-                <motion.div
-                  key="history"
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 10 }}
-                  className="overflow-x-auto"
-                >
-                  {/* Date Filter for History */}
-                  <div className="px-8 py-6 border-b border-border bg-surface-container-high/30 flex flex-wrap items-center justify-between gap-4">
-                    <h3 className="text-xs font-black text-muted-foreground uppercase tracking-[0.2em]">Transaction History</h3>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        type="date"
-                        aria-label="History from date"
-                        value={historyFromDate}
-                        onChange={(e) => setHistoryFromDate(e.target.value)}
-                        className="px-3 py-2 bg-surface-container-high border border-border rounded-xl text-xs font-bold text-foreground outline-none focus:ring-2 focus:ring-google-blue/20"
-                      />
-                      <span className="text-xs font-bold text-muted-foreground">to</span>
-                      <input
-                        type="date"
-                        aria-label="History to date"
-                        value={historyToDate}
-                        onChange={(e) => setHistoryToDate(e.target.value)}
-                        className="px-3 py-2 bg-surface-container-high border border-border rounded-xl text-xs font-bold text-foreground outline-none focus:ring-2 focus:ring-google-blue/20"
-                      />
-                      <motion.button
-                        whileTap={{ scale: 0.95 }}
-                        onClick={handleDownloadHistoryStatement}
-                        className="ml-2 px-4 py-2 bg-google-blue text-white rounded-xl text-xs font-black uppercase tracking-wide shadow-md hover:shadow-lg transition-all flex items-center gap-2"
-                      >
-                        <Download className="w-4 h-4" /> PDF
-                      </motion.button>
-                    </div>
-                  </div>
-
-                  <ul className="divide-y divide-border" aria-label="Party transactions">
-                    {filteredHistoryTransactions.map(tx => {
-                      const outgoing = tx.type === 'PAYMENT' && (tx.data as Payment).type === 'PAID';
-                      const label = tx.type === 'INVOICE' ? 'Invoice' : tx.type === 'CREDIT_NOTE' ? 'Sales return' : outgoing ? 'Payment out' : 'Payment in';
-                      return <li key={tx.id} className="flex flex-wrap items-center gap-2 px-3 py-3 sm:px-4">
-                        <div className="min-w-0 flex-1">
-                          <p className="break-words text-sm font-semibold">{label} · {tx.reference}</p>
-                          <p className="text-xs text-muted-foreground">{formatDate(tx.date.slice(0, 10))}{tx.mode ? ' · ' + tx.mode.replace(/_/g, ' ') : ''}</p>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <p className="font-semibold tabular-nums">{workspaceMoney(tx.amount)}</p>
-                          {tx.status && <p className="text-xs text-muted-foreground">{tx.status === 'PARTIAL' ? 'Part-paid' : tx.status.toLowerCase()}</p>}
-                        </div>
-                        <button type="button" aria-label={'Share ' + tx.reference} onClick={() => handleShare(tx)} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-emerald-700 hover:bg-surface-container-high dark:text-emerald-300"><MessageCircle size={16} /></button>
-                        {tx.type !== 'PAYMENT' && <button type="button" aria-label={'View ' + tx.reference} onClick={() => setViewingInvoice(tx.data as Invoice)} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-primary hover:bg-surface-container-high"><Eye size={16} /></button>}
-                      </li>;
-                    })}
-                    {!filteredHistoryTransactions.length && <li className="px-4 py-10 text-center text-sm text-muted-foreground">No transactions in this period.</li>}
-                  </ul>
-                </motion.div>
-              )}
-
-              {activeTab === 'STATEMENT' && (
-                <motion.div
-                  key="statement"
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 10 }}
-                  className="p-12 flex flex-col items-center justify-center text-center max-w-2xl mx-auto"
-                >
-                  <div className="w-20 h-20 bg-google-blue/10 rounded-3xl flex items-center justify-center text-google-blue mb-6">
-                    <TrendingUp className="w-10 h-10" />
-                  </div>
-                  <h3 className="text-2xl font-black font-heading text-foreground mb-2">Statement Generator</h3>
-                  <p className="text-muted-foreground font-medium mb-10">Select a date range to generate a professional PDF account statement.</p>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full mb-8">
-                    <div className="space-y-2 text-left">
-                      <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-2">From Date</label>
-                      <input
-                        type="date"
-                        aria-label="Statement from date"
-                        value={startDate}
-                        onChange={(e) => setStartDate(e.target.value)}
-                        className="w-full p-4 bg-surface-container-high border-2 border-transparent focus:border-google-blue/30 rounded-[24px] text-sm font-bold text-foreground focus:ring-4 focus:ring-google-blue/5 outline-none transition-all"
-                      />
-                    </div>
-                    <div className="space-y-2 text-left">
-                      <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-2">To Date</label>
-                      <input
-                        type="date"
-                        aria-label="Statement to date"
-                        value={endDate}
-                        onChange={(e) => setEndDate(e.target.value)}
-                        className="w-full p-4 bg-surface-container-high border-2 border-transparent focus:border-google-blue/30 rounded-[24px] text-sm font-bold text-foreground focus:ring-4 focus:ring-google-blue/5 outline-none transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    onClick={handleDownloadStatement}
-                    className="w-full bg-foreground text-surface py-5 rounded-full font-black uppercase tracking-widest text-sm flex items-center justify-center gap-3 shadow-lg hover:bg-foreground/90 transition-all"
-                  >
-                    <Download className="w-5 h-5" /> Download Statement
-                  </motion.button>
-                </motion.div>
-              )}
-
-              {activeTab === 'NOTIFICATIONS' && (
-                <motion.div
-                  key="notifications"
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 10 }}
-                  className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-12"
-                >
-                  <div>
-                    <h3 className="text-xs font-black text-muted-foreground uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
-                      Follow-up Notes <span className="bg-surface-container-highest px-2 py-0.5 rounded-full text-[9px] text-foreground">Internal</span>
-                    </h3>
-                    <div className="space-y-4">
-                      {(selectedCustomer.followUpHistory || []).map((follow, idx) => (
-                        <div key={idx} className="p-4 bg-surface-container-high/30 border border-border rounded-[24px]">
-                          <p className="text-sm font-bold text-foreground mb-2">"{follow.note}"</p>
-                          <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{follow.date}</p>
-                        </div>
-                      ))}
-                      {(!selectedCustomer.followUpHistory || selectedCustomer.followUpHistory.length === 0) && (
-                        <p className="text-sm text-muted-foreground italic pl-2">No internal notes added yet.</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between items-center mb-6">
-                      <h3 className="text-xs font-black text-muted-foreground uppercase tracking-[0.2em]">Activity Log</h3>
-                      <button
-                        onClick={handleSendReminder}
-                        className="text-[10px] font-black uppercase tracking-widest text-google-blue hover:underline decoration-2 underline-offset-4"
-                      >
-                        Send Reminder Now
-                      </button>
-                    </div>
-
-                    <div className="relative border-l-2 border-surface-container-highest ml-3 space-y-8 pl-8 py-2">
-                      {(selectedCustomer.notifications || []).map((notif) => (
-                        <div key={notif.id} className="relative">
-                          <div className={`absolute - left - [41px] top - 0 w - 6 h - 6 rounded - full border - 4 border - surface flex items - center justify - center ${notif.type === 'INVOICE' ? 'bg-google-blue' :
-                            notif.type === 'PAYMENT' ? 'bg-google-green' : 'bg-orange-400'
-                            } `} />
-                          <h4 className="text-sm font-bold text-foreground">{notif.title}</h4>
-                          <p className="text-xs text-muted-foreground mt-1 mb-1">{notif.message}</p>
-                          <span className="text-[10px] font-black text-muted-foreground/50 uppercase tracking-widest">{notif.date}</span>
-                        </div>
-                      ))}
-                      {(!selectedCustomer.notifications || selectedCustomer.notifications.length === 0) && (
-                        <p className="text-sm text-muted-foreground italic">No activity recorded yet.</p>
-                      )}
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </div>
-
-        {/* M3 Payment Modal */}
-        <AnimatePresence>
-          {showPaymentModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setShowPaymentModal(false)}
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              />
-              <motion.div
-                initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                className="relative bg-surface w-full max-w-md rounded-[40px] shadow-google-lg overflow-hidden border border-border"
-              >
-                <div className="p-8 border-b border-border bg-surface-container-high/30 flex justify-between items-center">
-                  <div>
-                    <h3 className="text-2xl font-black font-heading text-foreground">Receive Payment</h3>
-                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-1">Record transaction</p>
-                  </div>
-                  <button onClick={() => setShowPaymentModal(false)} className="w-10 h-10 rounded-full bg-surface-container-high flex items-center justify-center hover:bg-surface-container-highest transition-colors">
-                    <X className="w-5 h-5 text-muted-foreground" />
-                  </button>
-                </div>
-
-                <form onSubmit={handleSavePayment} className="p-8 space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-2">Amount Received</label>
-                    <div className="relative">
-                      <span className="absolute left-6 top-1/2 -translate-y-1/2 text-xl font-black text-foreground">₹</span>
-                      <input
-                        type="number"
-                        required
-                        value={paymentAmount}
-                        onChange={(e) => setPaymentAmount(e.target.value)}
-                        className="w-full p-6 pl-12 bg-surface-container-high border-2 border-transparent focus:border-google-green/30 rounded-[24px] text-3xl font-black text-foreground focus:ring-4 focus:ring-google-green/5 outline-none transition-all placeholder:text-muted-foreground/20"
-                        placeholder="0.00"
-                        autoFocus
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-2">Date</label>
-                      <input
-                        type="date"
-                        required
-                        value={paymentDate}
-                        onChange={(e) => setPaymentDate(e.target.value)}
-                        className="w-full p-4 bg-surface-container-high border-2 border-transparent focus:border-google-blue/30 rounded-[24px] text-sm font-bold text-foreground focus:ring-4 focus:ring-google-blue/5 outline-none transition-all"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-2">Mode</label>
-                      <select
-                        value={paymentMode}
-                        onChange={(e) => setPaymentMode(e.target.value as any)}
-                        className="w-full p-4 bg-surface-container-high border-2 border-transparent focus:border-google-blue/30 rounded-[24px] text-sm font-bold text-foreground focus:ring-4 focus:ring-google-blue/5 outline-none transition-all appearance-none"
-                      >
-                        <option value="CASH">Cash</option>
-                        <option value="UPI">UPI / Online</option>
-                        <option value="BANK_TRANSFER">Bank Transfer</option>
-                        <option value="CHEQUE">Cheque</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-2">Reference Note</label>
-                    <input
-                      type="text"
-                      value={paymentNote}
-                      onChange={(e) => setPaymentNote(e.target.value)}
-                      className="w-full p-4 bg-surface-container-high border-2 border-transparent focus:border-google-blue/30 rounded-[24px] text-sm font-bold text-foreground focus:ring-4 focus:ring-google-blue/5 outline-none transition-all"
-                      placeholder="Optional details..."
-                    />
-                  </div>
-
-                  <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    type="submit"
-                    className="w-full bg-google-green text-white py-5 rounded-full font-black uppercase tracking-widest text-sm shadow-xl shadow-google-green/20 hover:shadow-google-lg mt-2"
-                  >
-                    Process Payment
-                  </motion.button>
-                </form>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
-      </div>
-    );
-  }
-
 
   const handleAddCustomer = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1020,7 +565,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
   };
 
   const handleEditCustomer = (customer: Customer) => {
-    setEditingCustomer({ ...customer });
+    setEditingCustomer({ ...customer, email: customer.email || '', phone: customer.phone || '', address: customer.address || '' });
     setShowEditCustomer(true);
   };
 
@@ -1036,11 +581,13 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
     StorageService.updateCustomer({
       ...editingCustomer,
       name,
-      company: editingCustomer.company.trim() || name,
-      email: editingCustomer.email.trim(),
+      company: editingCustomer.company?.trim() || name,
+      email: editingCustomer.email?.trim() || '',
       partyCategory: editingCustomer.partyCategory?.trim() || '',
     });
-    setCustomers(StorageService.getCustomers());
+    const refreshed = StorageService.getCustomers();
+    setCustomers(refreshed);
+    if (selectedCustomer?.id === editingCustomer.id) setSelectedCustomer(refreshed.find(party => party.id === editingCustomer.id) || null);
     setShowEditCustomer(false);
     setEditingCustomer(null);
     showAlert('Updated', 'Customer details updated successfully!', 'success');
@@ -1053,6 +600,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
   const confirmDeleteCustomer = () => {
     if (customerToDelete) {
       StorageService.deleteCustomer(customerToDelete);
+      if (selectedCustomer?.id === customerToDelete) setSelectedCustomer(null);
       setCustomers(StorageService.getCustomers());
       setShowEditCustomer(false);
       setEditingCustomer(null);
@@ -1063,20 +611,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
 
 
 
-  const filteredCustomers = customers.filter(c => {
-    const matchesSearch =
-      (c.company || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (c.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (c.phone && c.phone.includes(searchTerm));
-    const matchesFilter =
-      partyFilter === 'ALL' ||
-      (partyFilter === 'TO_COLLECT' && c.balance > 0) ||
-      (partyFilter === 'TO_PAY' && c.balance < 0);
-    return matchesSearch && matchesFilter && (!groupFilter || c.partyCategory?.trim() === groupFilter);
-  });
-
-  return (
-    <div className="bg-surface-container-low min-h-screen font-sans">
+  const partyDialogs = <>
       <datalist id="party-groups">{groupOptions}</datalist>
       {/* Modals */}
       <AlertModal
@@ -1266,6 +801,255 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
         )}
       </AnimatePresence>
 
+      <WhatsAppNumberModal
+        isOpen={showWhatsAppModal}
+        onClose={() => setShowWhatsAppModal(false)}
+        onSubmit={(phone) => {
+          if (pendingShareTx && selectedCustomer) {
+            const company = StorageService.getCompanyProfile();
+            if (pendingShareTx.kind === 'voucher') {
+              WhatsAppService.shareInvoice(pendingShareTx.data, selectedCustomer, company, phone);
+            } else {
+              WhatsAppService.sharePayment(pendingShareTx.data, selectedCustomer, company, phone);
+            }
+            setPendingShareTx(null);
+          }
+        }}
+      />
+      <InputModal
+        isOpen={showNoteModal}
+        onClose={() => setShowNoteModal(false)}
+        title="Log Call / Follow-up"
+        placeholder="e.g. Called for payment, Agreed to pay Monday"
+        submitLabel="Save Note"
+        onSubmit={(note) => {
+          if (selectedCustomer && typeof selectedCustomer === 'object') {
+            const updated: Customer = Object.assign({}, selectedCustomer);
+            if (!updated.followUpHistory) updated.followUpHistory = [];
+            updated.followUpHistory.unshift({ date: new Date().toISOString().split('T')[0], note });
+            StorageService.updateCustomer(updated);
+            setSelectedCustomer(updated);
+            HapticService.light();
+          }
+        }}
+      />
+  </>;
+
+  if (selectedCustomer) {
+    const name = selectedCustomer.company || selectedCustomer.name || 'Party';
+    const netBalance = Number(selectedCustomer.balance) || 0;
+    const ledger = buildPartyLedger(selectedCustomer, {
+      sales: StorageService.getInvoices(), purchases: StorageService.getPurchases(),
+      debitNotes: StorageService.getVouchersByType('DEBIT_NOTE'), payments: StorageService.getPayments(),
+    }, range.from, range.to);
+
+    return (
+      <div className="bg-surface-container-low min-h-screen font-sans dark:bg-[#0e0f13]">
+        {partyDialogs}
+        {/* Overlay for viewing invoice */}
+        <AnimatePresence>
+          {viewingInvoice && (
+            <motion.div
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+              className="fixed inset-0 z-[60] bg-surface overflow-y-auto"
+            >
+              <InvoiceView
+                invoice={viewingInvoice}
+                onBack={() => setViewingInvoice(null)}
+                onDelete={invoice => {
+                  if (invoice.type === 'PURCHASE' || invoice.type === 'DEBIT_NOTE') StorageService.deletePurchase(invoice.id);
+                  else StorageService.deleteInvoice(invoice.id);
+                  const list = StorageService.getCustomers();
+                  setCustomers(list);
+                  setSelectedCustomer(list.find(party => party.id === selectedCustomer.id) || null);
+                  setViewingInvoice(null);
+                }}
+                onEdit={(inv) => {
+                  setViewingInvoice(null);
+                  if (onEditInvoice) onEditInvoice(inv);
+                }}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <header className="sticky top-0 z-30 border-b border-border bg-surface-container-low/95 backdrop-blur dark:bg-[#0b0c10]/95">
+          <div className="mx-auto flex min-h-[4.25rem] max-w-3xl items-center gap-2.5 px-3 sm:px-4">
+            <button type="button" aria-label="Back" className={partyAction} onClick={() => {
+              if (initialCustomerId && onBack) onBack();
+              else setSelectedCustomer(null);
+            }}><ArrowLeft size={19} /></button>
+            <h1 className="min-w-0 flex-1 break-words font-heading text-lg font-black uppercase sm:text-xl">{name}</h1>
+            <button type="button" aria-label="Edit party" className={partyAction} onClick={() => handleEditCustomer(selectedCustomer)}><Edit size={17} /></button>
+          </div>
+        </header>
+        <div className="mx-auto max-w-3xl space-y-3 px-2.5 pt-3 pb-20 sm:px-4">
+          <nav aria-label="Party details tabs" className="grid grid-cols-2 gap-1 rounded-full border border-border bg-surface p-1 dark:bg-[#111216]">
+            {(['TRANSACTIONS', 'PROFILE'] as const).map(tab => <button key={tab} type="button" aria-pressed={activeTab === tab}
+              onClick={() => setActiveTab(tab)} className={`min-h-9 rounded-full text-xs font-bold uppercase tracking-wide ${activeTab === tab ? 'bg-primary/15 text-primary dark:text-blue-400' : 'text-muted-foreground hover:bg-surface-container-high'}`}>
+              {tab === 'TRANSACTIONS' ? 'Transactions' : 'Profile'}
+            </button>)}
+          </nav>
+          <section aria-label="Party net balance" className="flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-border bg-primary/10 px-4 py-3 dark:bg-[#121b2d]">
+            <div className="min-w-0">
+              <p className="text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">Net balance</p>
+              <p className={`break-words font-heading text-2xl font-black tabular-nums ${netBalance > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                {workspaceMoney(Math.abs(netBalance))}
+                {netBalance !== 0 && <span className="ml-1.5 align-middle text-[10px] font-semibold uppercase text-muted-foreground">{netBalance > 0 ? 'To collect' : 'To pay'}</span>}
+              </p>
+            </div>
+            <button type="button" onClick={() => { setPaymentDate(localDay()); setShowPaymentModal(true); }}
+              className="min-h-10 shrink-0 rounded-full bg-emerald-600 px-4 text-xs font-black uppercase text-white hover:bg-emerald-700">
+              {netBalance < 0 ? 'Pay now' : 'Receive now'}
+            </button>
+          </section>
+
+          {activeTab === 'TRANSACTIONS' ? <PartyLedgerPanel ledger={ledger} range={range} onRangeChange={setRange}
+            onDownload={() => void handleDownloadHistoryStatement()} onShare={() => void handleDownloadHistoryStatement(true)}
+            onShareEntry={row => handleShare(row.record)} onView={setViewingInvoice} /> : (
+            <section aria-labelledby="party-profile" className="space-y-4 rounded-[1.6rem] border border-border bg-surface p-4 dark:bg-[#111216]">
+              <h2 id="party-profile" className="font-heading text-lg font-black">Profile</h2>
+              <dl className="grid gap-x-4 gap-y-3 text-sm sm:grid-cols-2">
+                {[
+                  ['Contact name', selectedCustomer.name], ['Phone', selectedCustomer.phone], ['Email', selectedCustomer.email],
+                  ['Address', selectedCustomer.address], ['GSTIN', selectedCustomer.gstin], ['Group', selectedCustomer.partyCategory],
+                ].filter(([, value]) => value).map(([label, value]) => <div key={label} className="min-w-0">
+                  <dt className="text-xs text-muted-foreground">{label}</dt><dd className="break-words font-semibold">{value}</dd>
+                </div>)}
+              </dl>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => setShowNoteModal(true)} className={workspace.secondary}>Log call</button>
+                <button type="button" onClick={handleSendReminder} className={workspace.secondary}>Record reminder</button>
+                <button type="button" onClick={handleDownloadStatement} className={workspace.secondary}><Download size={16} /> Download Statement</button>
+              </div>
+              <PartyDateRange value={range} onChange={setRange} />
+              <div className="space-y-2 border-t border-border pt-3">
+                <h3 className="text-sm font-semibold">Follow-up and activity</h3>
+                {selectedCustomer.followUpHistory?.map((entry, index) => <p key={index} className="break-words text-sm">{entry.note} <time className="text-xs text-muted-foreground">{formatDate(entry.date)}</time></p>)}
+                {selectedCustomer.notifications?.map(entry => <div key={entry.id} className="text-sm">
+                  <p className="font-semibold">{entry.title}</p><p className="break-words text-muted-foreground">{entry.message}</p>
+                </div>)}
+                {!selectedCustomer.followUpHistory?.length && !selectedCustomer.notifications?.length && <p className="text-sm text-muted-foreground">No activity recorded yet.</p>}
+              </div>
+            </section>
+          )}
+        </div>
+
+        {/* M3 Payment Modal */}
+        <AnimatePresence>
+          {showPaymentModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setShowPaymentModal(false)}
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              />
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="relative bg-surface w-full max-w-md rounded-[40px] shadow-google-lg overflow-hidden border border-border"
+              >
+                <div className="p-8 border-b border-border bg-surface-container-high/30 flex justify-between items-center">
+                  <div>
+                    <h3 className="text-2xl font-black font-heading text-foreground">{netBalance < 0 ? 'Make Payment' : 'Receive Payment'}</h3>
+                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-1">Record transaction</p>
+                  </div>
+                  <button onClick={() => setShowPaymentModal(false)} className="w-10 h-10 rounded-full bg-surface-container-high flex items-center justify-center hover:bg-surface-container-highest transition-colors">
+                    <X className="w-5 h-5 text-muted-foreground" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSavePayment} className="p-8 space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-2">{netBalance < 0 ? 'Amount Paid' : 'Amount Received'}</label>
+                    <div className="relative">
+                      <span className="absolute left-6 top-1/2 -translate-y-1/2 text-xl font-black text-foreground">₹</span>
+                      <input
+                        type="number"
+                        required
+                        value={paymentAmount}
+                        onChange={(e) => setPaymentAmount(e.target.value)}
+                        className="w-full p-6 pl-12 bg-surface-container-high border-2 border-transparent focus:border-google-green/30 rounded-[24px] text-3xl font-black text-foreground focus:ring-4 focus:ring-google-green/5 outline-none transition-all placeholder:text-muted-foreground/20"
+                        placeholder="0.00"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-2">Date</label>
+                      <input
+                        type="date"
+                        required
+                        value={paymentDate}
+                        onChange={(e) => setPaymentDate(e.target.value)}
+                        className="w-full p-4 bg-surface-container-high border-2 border-transparent focus:border-google-blue/30 rounded-[24px] text-sm font-bold text-foreground focus:ring-4 focus:ring-google-blue/5 outline-none transition-all"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-2">Mode</label>
+                      <select
+                        value={paymentMode}
+                        onChange={(e) => setPaymentMode(e.target.value as any)}
+                        className="w-full p-4 bg-surface-container-high border-2 border-transparent focus:border-google-blue/30 rounded-[24px] text-sm font-bold text-foreground focus:ring-4 focus:ring-google-blue/5 outline-none transition-all appearance-none"
+                      >
+                        <option value="CASH">Cash</option>
+                        <option value="UPI">UPI / Online</option>
+                        <option value="BANK_TRANSFER">Bank Transfer</option>
+                        <option value="CHEQUE">Cheque</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-2">Reference Note</label>
+                    <input
+                      type="text"
+                      value={paymentNote}
+                      onChange={(e) => setPaymentNote(e.target.value)}
+                      className="w-full p-4 bg-surface-container-high border-2 border-transparent focus:border-google-blue/30 rounded-[24px] text-sm font-bold text-foreground focus:ring-4 focus:ring-google-blue/5 outline-none transition-all"
+                      placeholder="Optional details..."
+                    />
+                  </div>
+
+                  <motion.button
+                    whileTap={{ scale: 0.95 }}
+                    type="submit"
+                    className="w-full bg-google-green text-white py-5 rounded-full font-black uppercase tracking-widest text-sm shadow-xl shadow-google-green/20 hover:shadow-google-lg mt-2"
+                  >
+                    Process Payment
+                  </motion.button>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
+
+
+  const filteredCustomers = customers.filter(c => {
+    const matchesSearch =
+      (c.company || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.phone && c.phone.includes(searchTerm));
+    const matchesFilter =
+      partyFilter === 'ALL' ||
+      (partyFilter === 'TO_COLLECT' && c.balance > 0) ||
+      (partyFilter === 'TO_PAY' && c.balance < 0);
+    return matchesSearch && matchesFilter && (!groupFilter || c.partyCategory?.trim() === groupFilter);
+  });
+
+  return (
+    <div className="bg-surface-container-low min-h-screen font-sans">
+      {partyDialogs}
       <div className={workspace.page}>
         <WorkspaceHeading title="Parties" onBack={onBackToWorkspace} actions={<>
           {onBack && <button type="button" aria-label="Back" onClick={onBack} className={workspace.secondary}><ArrowLeft size={16} /></button>}
@@ -1503,38 +1287,6 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
           </div>
         )}
       </AnimatePresence>
-      <WhatsAppNumberModal
-        isOpen={showWhatsAppModal}
-        onClose={() => setShowWhatsAppModal(false)}
-        onSubmit={(phone) => {
-          if (pendingShareTx && selectedCustomer) {
-            const company = StorageService.getCompanyProfile();
-            if (pendingShareTx.type === 'INVOICE') {
-              WhatsAppService.shareInvoice(pendingShareTx.data as Invoice, selectedCustomer, company, phone);
-            } else {
-              WhatsAppService.sharePayment(pendingShareTx.data as Payment, selectedCustomer, company, phone);
-            }
-            setPendingShareTx(null);
-          }
-        }}
-      />
-      <InputModal
-        isOpen={showNoteModal}
-        onClose={() => setShowNoteModal(false)}
-        title="Log Call / Follow-up"
-        placeholder="e.g. Called for payment, Agreed to pay Monday"
-        submitLabel="Save Note"
-        onSubmit={(note) => {
-          if (selectedCustomer && typeof selectedCustomer === 'object') {
-            const updated: Customer = Object.assign({}, selectedCustomer);
-            if (!updated.followUpHistory) updated.followUpHistory = [];
-            updated.followUpHistory.unshift({ date: new Date().toISOString().split('T')[0], note });
-            StorageService.updateCustomer(updated);
-            setSelectedCustomer(updated);
-            HapticService.light();
-          }
-        }}
-      />
     </div>
   );
 };

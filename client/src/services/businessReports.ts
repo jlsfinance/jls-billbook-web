@@ -155,25 +155,27 @@ export function buildPartyLedger(party: Customer, source: Pick<ReportSource, 'sa
   const entries = [
     ...vouchers.filter(voucher => voucher.customerId === party.id && !voucher.isDeleted &&
       voucher.conversionStatus !== 'CANCELLED' && (!voucher.type || ['SALE', 'PURCHASE', 'CREDIT_NOTE', 'DEBIT_NOTE'].includes(voucher.type)))
-      .map(voucher => {
+      .flatMap(voucher => {
         const purchase = voucher.type === 'PURCHASE' || voucher.type === 'DEBIT_NOTE';
         const isReturn = fiscal(voucher) < 0;
         const direction = (purchase ? -1 : 1) * fiscal(voucher);
         const linked = allocated.get((purchase ? 'purchase:' : 'sale:') + voucher.id) || 0;
-        // Add back separate allocations here, then post each receipt/payment on its own date below.
-        const value = isReturn
-          ? (voucher.status === 'PAID' ? 0 : Math.abs(amount(voucher.total)))
-          : Math.min(Math.abs(amount(voucher.total)), due(voucher) + linked);
-        return {
+        const faceValue = Math.abs(amount(voucher.total));
+        // A settlement recorded on the bill posts on its date. Separate allocations appear only on their payment dates.
+        const unsettled = isReturn ? (voucher.status === 'PAID' ? 0 : faceValue) : Math.min(faceValue, due(voucher) + linked);
+        const settledOnBill = round(faceValue - unsettled);
+        const entry = {
           date: voucher.date, kind: purchase ? isReturn ? 'Purchase Return' : 'Purchase' : isReturn ? 'Sales Return' : 'Sale',
           ref: voucher.invoiceNumber, mode: voucher.paymentMode || '', status: voucher.status || '',
-          direction, delta: round(direction * value),
+          direction, delta: round(direction * faceValue), record: { kind: 'voucher' as const, data: voucher }, settlement: false,
         };
+        return settledOnBill > 0 ? [entry, { ...entry, kind: direction > 0 ? 'Payment In on bill' : 'Payment Out on bill',
+          direction: -direction, delta: round(-direction * settledOnBill), status: '', settlement: true }] : [entry];
       }),
     ...paymentRows.map(payment => {
       const direction = payment.type === 'PAID' ? 1 : -1;
       return { date: payment.date, kind: paymentLabel(payment), ref: payment.reference || payment.invoiceNumber || '',
-        mode: payment.mode, status: '', direction, delta: round(direction * amount(payment.amount)) };
+        mode: payment.mode || '', status: '', direction, settlement: false, delta: round(direction * amount(payment.amount)), record: { kind: 'payment' as const, data: payment } };
     }),
   ].filter(entry => Boolean(day(entry.date))).sort((a, b) => a.date.localeCompare(b.date));
 
@@ -352,7 +354,7 @@ export function buildBusinessReport(id: string, source: ReportSource, filters: R
       });
       return report(headers, [[formatDate(filters.from), 'Opening Balance', '', '', '', ledger.opening], ...lines],
         [money('Opening Balance', ledger.opening), money('Closing Balance', ledger.closing)],
-        'Positive balances are receivable. Cash paid directly on a bill is reflected in its outstanding amount.');
+        'Positive balances are receivable. Payments recorded on a bill appear on the bill date.');
     }
     case 'party_aging': {
       const rows = parties.filter(p => amount(p.balance) > 0).map(party => {
