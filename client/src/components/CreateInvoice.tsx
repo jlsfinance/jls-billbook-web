@@ -525,12 +525,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
   const addProductToInvoice = (
     product: Product,
     barcodeSnapshot?: string
-  ): { incremented: boolean; quantity: number } => {
+  ) => {
     setHasChanges(true);
     const supplier = company;
     const customer = customers.find(c => c.id === selectedCustomerId);
-    let incremented = false;
-    let quantity = 1;
 
     setItems(prev => {
       const existingIndex = prev.findIndex(i => i.productId === product.id);
@@ -543,8 +541,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
         if (gstEnabled) calculateTaxes(item, supplier, customer);
         else item.totalAmount = item.baseAmount;
         copy[existingIndex] = item;
-        incremented = true;
-        quantity = item.quantity;
         return copy;
       }
 
@@ -574,7 +570,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
       return [...prev, newItem];
     });
 
-    return { incremented, quantity };
   };
 
   const handleBarcodeScan = (barcode: string, source: BarcodeSource) => {
@@ -608,7 +603,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
     }
 
     const product = result.product;
-    const out = addProductToInvoice(product, barcode);
+    addProductToInvoice(product, barcode);
     setLastScannedId(product.id);
     HapticService.light();
 
@@ -616,20 +611,16 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
     const stockNote = available <= 0 ? ' Is product ka stock available nahi hai.' : '';
     setScanMsg({
       kind: available <= 0 ? 'warn' : 'ok',
-      text: out.incremented
-        ? `${product.name} — quantity ${out.quantity} ho gayi.${stockNote}`
-        : `${product.name} bill me add hua (₹${product.price}).${stockNote}`,
+      text: `${product.name} ka 1 unit bill mein add hua.${stockNote}`,
     });
   };
 
   /** Undo the most recent scan (PRD §14: undo last scan). */
   const handleUndoLastScan = () => {
     if (!lastScannedId) return;
+    setLastScannedId(null);
     const idx = items.findIndex(i => i.productId === lastScannedId);
-    if (idx < 0) {
-      setLastScannedId(null);
-      return;
-    }
+    if (idx < 0) return;
     const item = items[idx];
     if (Number(item.quantity) > 1) {
       const copy = [...items];
@@ -644,7 +635,6 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
     } else {
       setItems(items.filter((_, i) => i !== idx));
       setScanMsg({ kind: 'ok', text: `${item.description} bill se hata diya.` });
-      setLastScannedId(null);
     }
   };
 
@@ -1314,7 +1304,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
               label="Scan barcode to add item"
               placeholder="Barcode scan karein…"
               onScan={handleBarcodeScan}
-              lastScanMessage={undefined}
+              continuous
+              cameraFeedback={scanMsg}
             />
             {scanMsg && (
               <div

@@ -5,6 +5,7 @@ import { StorageService } from '../services/storageService';
 import BarcodeScanField from './BarcodeScanField';
 import ThermalReceiptModal from './ThermalReceiptModal';
 import { HapticService } from '../services/hapticService';
+import { lookupBarcode } from '../services/barcodeService';
 
 interface POSBillingProps {
   onBack: () => void;
@@ -22,6 +23,7 @@ export const POSBilling: React.FC<POSBillingProps> = ({ onBack }) => {
   const [splitCash, setSplitCash] = useState<string>('');
   const [splitOnline, setSplitOnline] = useState<string>('');
   const [savedInvoice, setSavedInvoice] = useState<Invoice | null>(null);
+  const [scanFeedback, setScanFeedback] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string } | null>(null);
 
   const categories = useMemo(() => {
     const set = new Set<string>(['ALL']);
@@ -205,11 +207,24 @@ export const POSBilling: React.FC<POSBillingProps> = ({ onBack }) => {
             <BarcodeScanField
               label="Quick Scan"
               placeholder="Scan barcode to add directly..."
+              continuous
+              cameraFeedback={scanFeedback}
               onScan={(code) => {
-                const hit = StorageService.findProductByBarcode(code);
-                if (hit) addItem(hit);
+                const result = lookupBarcode(StorageService.getProducts(), code);
+                if (result.product) {
+                  addItem(result.product);
+                  setScanFeedback({ kind: 'ok', text: `${result.product.name} added to the bill.` });
+                } else if (result.archived) {
+                  setScanFeedback({ kind: 'warn', text: 'This item is archived. Restore it in Items before billing.' });
+                } else {
+                  setScanFeedback({
+                    kind: 'warn',
+                    text: result.valid ? `No active item is linked to ${code}.` : 'Invalid barcode. Check the label and try again.',
+                  });
+                }
               }}
             />
+            {scanFeedback && <p role="status" className={`text-xs font-medium ${scanFeedback.kind === 'ok' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-300'}`}>{scanFeedback.text}</p>}
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input

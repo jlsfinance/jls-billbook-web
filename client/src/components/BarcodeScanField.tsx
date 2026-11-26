@@ -1,199 +1,140 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { ChangeEvent, KeyboardEvent } from 'react';
 import { ScanLine, Camera, X, CheckCircle2 } from 'lucide-react';
-import { normalizeBarcode, SCAN_IDLE_MS } from '../services/barcodeService';
+import { normalizeScannedBarcode, SCAN_IDLE_MS } from '../services/barcodeService';
 import type { BarcodeSource } from '../services/barcodeService';
+import { isScannerBurst, recordBarcodeInput } from '../services/barcodeInput';
+import type { BarcodeBurst } from '../services/barcodeInput';
 import BarcodeScannerModal from './BarcodeScannerModal';
 
 export interface BarcodeScanFieldProps {
-  /** Fired once per accepted scan with the normalized value. */
   onScan: (barcode: string, source: BarcodeSource) => void;
   label?: string;
   placeholder?: string;
   autoFocus?: boolean;
   disabled?: boolean;
   hint?: string;
-  /** Short confirmation text rendered under the field after a scan. */
   lastScanMessage?: string;
-  /** Render the camera button (default true). */
   enableCamera?: boolean;
+  continuous?: boolean;
+  cameraFeedback?: { kind: 'ok' | 'warn' | 'err'; text: string } | null;
   className?: string;
   inputClassName?: string;
 }
 
-/**
- * The one scan input used by Inventory, Billing and Stock-In.
- *
- * Supports:
- *  - USB / Bluetooth scanners in keyboard-wedge mode (they type + send Enter/Tab)
- *  - Scanners that do NOT send a suffix key: a short inactivity timer flushes the buffer
- *  - Plain manual typing (Enter to submit)
- *
- * The source is inferred from typing speed: machine-fast input is tagged USB,
- * human-speed input is tagged MANUAL. Used for analytics only.
- */
-const BarcodeScanField: React.FC<BarcodeScanFieldProps> = ({
-  onScan,
-  label = 'Barcode',
-  placeholder = 'Scan karein ya barcode type karein…',
-  autoFocus = false,
-  disabled = false,
-  hint,
-  lastScanMessage,
-  enableCamera = true,
-  className = '',
-  inputClassName = '',
-}) => {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const idleTimer = useRef<number | null>(null);
-  const bufferStart = useRef<number>(0);
-  const lastKeyAt = useRef<number>(0);
+const emptyInput: BarcodeBurst = { value: '', lastAt: 0, characters: 0 };
 
+export default function BarcodeScanField({
+  onScan, label = 'Barcode', placeholder = 'Scan or enter a barcode', autoFocus = false,
+  disabled = false, hint, lastScanMessage, enableCamera = true, continuous = false, cameraFeedback,
+  className = '', inputClassName = '',
+}: BarcodeScanFieldProps) {
+  const id = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const cameraButtonRef = useRef<HTMLButtonElement>(null);
+  const idleTimer = useRef<number>(0);
+  const flashTimer = useRef<number>(0);
+  const buffer = useRef<BarcodeBurst>(emptyInput);
+  const callback = useRef(onScan);
+  callback.current = onScan;
   const [value, setValue] = useState('');
   const [cameraOpen, setCameraOpen] = useState(false);
-  const [focused, setFocused] = useState(false);
   const [flash, setFlash] = useState(false);
+  const [error, setError] = useState('');
 
-  const clearIdle = () => {
-    if (idleTimer.current !== null) {
-      window.clearTimeout(idleTimer.current);
-      idleTimer.current = null;
-    }
-  };
-
-  /** Machine scanners deliver the whole string in a few ms per character. */
-  const inferSource = (): BarcodeSource => {
-    const len = value.length || 1;
-    const span = Math.max(lastKeyAt.current - bufferStart.current, 0);
-    return span / len < 30 ? 'USB' : 'MANUAL';
-  };
-
-  const flush = (source?: BarcodeSource) => {
-    clearIdle();
-    const normalized = normalizeBarcode(value);
+  function clear() {
+    window.clearTimeout(idleTimer.current);
+    buffer.current = emptyInput;
     setValue('');
-    if (!normalized) return;
-    setFlash(true);
-    window.setTimeout(() => setFlash(false), 600);
-    onScan(normalized, source || inferSource());
-  };
+    setError('');
+  }
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      if (value) {
-        e.preventDefault();
-        flush();
-      }
+  function submit() {
+    window.clearTimeout(idleTimer.current);
+    const current = buffer.current;
+    if (!current.value || disabled) return;
+    const code = normalizeScannedBarcode(current.value);
+    if (!code) {
+      setError('Enter a valid barcode of up to 128 characters.');
       return;
     }
-    const now = Date.now();
-    if (!value) bufferStart.current = now;
-    lastKeyAt.current = now;
-  };
+    clear();
+    setFlash(true);
+    window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlash(false), 600);
+    callback.current(code, isScannerBurst(current) ? 'USB' : 'MANUAL');
+  }
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const next = e.target.value;
-    const now = Date.now();
-    if (!value && next) bufferStart.current = now;
-    lastKeyAt.current = now;
-    setValue(next);
-
-    // Scanners without an Enter/Tab suffix: flush after a short idle gap.
-    clearIdle();
-    if (next.trim().length >= 4) {
-      idleTimer.current = window.setTimeout(() => flush(), SCAN_IDLE_MS);
+  function change(event: ChangeEvent<HTMLInputElement>) {
+    const inputType = (event.nativeEvent as InputEvent).inputType || '';
+    const next = recordBarcodeInput(buffer.current, event.target.value, performance.now(), inputType);
+    buffer.current = next;
+    setValue(next.value);
+    setError('');
+    window.clearTimeout(idleTimer.current);
+    if (isScannerBurst(next)) {
+      idleTimer.current = window.setTimeout(() => {
+        if (document.activeElement === inputRef.current && buffer.current === next) submit();
+      }, SCAN_IDLE_MS);
     }
-  };
+  }
 
-  useEffect(() => () => clearIdle(), []);
+  function keyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.nativeEvent.isComposing) return;
+    if (event.key === 'Enter' || (event.key === 'Tab' && isScannerBurst(buffer.current))) {
+      event.preventDefault();
+      submit();
+    }
+  }
+
+  function closeCamera(focusBarcode: boolean) {
+    setCameraOpen(false);
+    requestAnimationFrame(() => (focusBarcode ? inputRef.current : cameraButtonRef.current)?.focus());
+  }
 
   useEffect(() => {
-    if (autoFocus && !disabled) {
-      const t = window.setTimeout(() => inputRef.current?.focus(), 120);
-      return () => window.clearTimeout(t);
-    }
+    if (disabled || cameraOpen) window.clearTimeout(idleTimer.current);
+  }, [disabled, cameraOpen]);
+
+  useEffect(() => () => {
+    window.clearTimeout(idleTimer.current);
+    window.clearTimeout(flashTimer.current);
+  }, []);
+
+  useEffect(() => {
+    if (!autoFocus || disabled) return;
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 120);
+    return () => window.clearTimeout(timer);
   }, [autoFocus, disabled]);
 
-  return (
-    <div className={`space-y-2 ${className}`}>
-      {label && (
-        <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-2 block">
-          {label}
-        </label>
-      )}
-
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">
-            {flash ? (
-              <CheckCircle2 className="w-5 h-5 text-google-green" />
-            ) : (
-              <ScanLine className="w-5 h-5" />
-            )}
-          </div>
-          <input
-            ref={inputRef}
-            value={value}
-            disabled={disabled}
-            inputMode="text"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder={placeholder}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            className={`w-full pl-12 pr-10 py-4 rounded-[20px] bg-surface-container-high border-2 font-mono font-bold text-foreground outline-none transition-all ${
-              focused ? 'border-google-blue/40 ring-4 ring-google-blue/5' : 'border-transparent'
-            } ${inputClassName}`}
-          />
-          {value && (
-            <button
-              type="button"
-              onClick={() => setValue('')}
-              aria-label="Clear"
-              className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-surface-container-highest flex items-center justify-center text-muted-foreground"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+  return <div className={`space-y-2 ${className}`}>
+    <label htmlFor={id} className="block px-1 text-xs font-semibold text-muted-foreground">{label}</label>
+    <div className="flex flex-wrap gap-2">
+      <div className="relative min-w-0 flex-1">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted-foreground">
+          {flash ? <CheckCircle2 size={18} className="text-emerald-600" /> : <ScanLine size={18} />}
         </div>
-
-        {enableCamera && (
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => setCameraOpen(true)}
-            className="px-5 rounded-[20px] bg-google-blue text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-google-blue/20 disabled:opacity-50"
-          >
-            <Camera className="w-5 h-5" />
-            <span className="hidden sm:inline">Camera</span>
-          </button>
-        )}
+        <input id={id} ref={inputRef} value={value} disabled={disabled} inputMode="text" autoComplete="off" spellCheck={false}
+          placeholder={placeholder} onChange={change} onKeyDown={keyDown} onBlur={() => window.clearTimeout(idleTimer.current)}
+          className={`w-full rounded-xl border bg-background py-3 pl-10 pr-9 font-mono text-sm outline-none focus:ring-2 focus:ring-primary/40 ${inputClassName}`} />
+        {value && <button type="button" aria-label="Clear barcode" onClick={() => { clear(); inputRef.current?.focus(); }}
+          className="absolute inset-y-0 right-2 p-1 text-muted-foreground"><X size={16} /></button>}
       </div>
-
-      {!focused && !disabled && (
-        <p className="text-[11px] font-bold text-amber-600 px-2">
-          Click to activate scanner — USB/Bluetooth scanner ke liye box par focus zaroori hai.
-        </p>
-      )}
-
-      {hint && !lastScanMessage && (
-        <p className="text-[11px] font-bold text-muted-foreground px-2">{hint}</p>
-      )}
-
-      {lastScanMessage && (
-        <p className="text-[11px] font-black text-google-green px-2">{lastScanMessage}</p>
-      )}
-
-      <BarcodeScannerModal
-        open={cameraOpen}
-        onClose={() => setCameraOpen(false)}
-        onScan={(code) => {
-          onScan(normalizeBarcode(code), 'CAMERA');
-        }}
-      />
+      {value && <button type="button" disabled={disabled} onClick={submit} className="rounded-xl border px-3 text-sm font-semibold">Use code</button>}
+      {enableCamera && <button ref={cameraButtonRef} type="button" disabled={disabled} aria-label="Open camera scanner" onClick={() => {
+        window.clearTimeout(idleTimer.current);
+        setCameraOpen(true);
+      }} className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
+        <Camera size={18} /><span className="hidden sm:inline">Camera</span>
+      </button>}
     </div>
-  );
-};
-
-export default BarcodeScanField;
+    {error ? <p role="alert" className="px-1 text-xs text-red-600 dark:text-red-400">{error}</p>
+      : <p className="px-1 text-xs text-muted-foreground">{lastScanMessage || hint || 'Type a code and press Enter. Keep this field focused for a USB or Bluetooth scanner.'}</p>}
+    <BarcodeScannerModal open={cameraOpen && !disabled} continuous={continuous} feedback={cameraFeedback}
+      onClose={() => closeCamera(false)} onManualEntry={() => closeCamera(true)} onScan={code => {
+        clear();
+        if (!continuous) closeCamera(true);
+        callback.current(code, 'CAMERA');
+      }} />
+  </div>;
+}

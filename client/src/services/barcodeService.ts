@@ -44,15 +44,22 @@ export interface BarcodeLookupResult {
  * Strip control chars, zero-width chars and all whitespace.
  * Digits (including leading zeros) are never altered.
  */
-export const normalizeBarcode = (raw: string | number | null | undefined): string => {
+const cleanBarcode = (raw: string | number | null | undefined): string => {
   if (raw === null || raw === undefined) return '';
   return String(raw)
     // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // CR, LF, TAB, scanner suffixes
     .replace(/[\u200B-\u200D\uFEFF]/g, '')        // zero-width space/joiner, BOM
-    .replace(/\s+/g, '')                          // every remaining whitespace
-    .slice(0, MAX_BARCODE_LENGTH);
+    .replace(/\s+/g, '');                        // every remaining whitespace
 };
+
+export const normalizeBarcode = (raw: string | number | null | undefined): string =>
+  cleanBarcode(raw).slice(0, MAX_BARCODE_LENGTH);
+
+export function normalizeScannedBarcode(raw: string) {
+  const value = cleanBarcode(raw);
+  return value.length <= MAX_BARCODE_LENGTH && /^[\x20-\x7E]+$/.test(value) ? value : '';
+}
 
 /**
  * GTIN mod-10 check digit for EAN-8/12/13 and ITF-14.
@@ -90,10 +97,8 @@ export const detectBarcodeFormat = (value: string): BarcodeFormat => {
 
 /** Structural validation: non-empty, printable ASCII, within length cap, valid GTIN check digit. */
 export const isBarcodeStructurallyValid = (value: string): boolean => {
-  const v = normalizeBarcode(value);
+  const v = normalizeScannedBarcode(value);
   if (!v) return false;
-  if (v.length > MAX_BARCODE_LENGTH) return false;
-  if (!/^[\x20-\x7E]+$/.test(v)) return false;
   return isValidGtinCheckDigit(v);
 };
 
@@ -109,22 +114,29 @@ export interface LookupOptions {
   includeDisabled?: boolean;
 }
 
+function upcAlias(value: string) {
+  if (!isValidGtinCheckDigit(value)) return '';
+  if (/^\d{12}$/.test(value)) return `0${value}`;
+  return /^0\d{12}$/.test(value) ? value.slice(1) : '';
+}
+
 /** Find the product linked to a barcode inside one business scope. */
 export const findProductByBarcode = (
   products: Product[],
   barcode: string,
   opts: LookupOptions = {}
 ): Product | null => {
-  const v = normalizeBarcode(barcode);
+  const v = normalizeScannedBarcode(barcode);
   if (!v) return null;
-  const hit = products.find(
+  const candidates = products.filter(
     (p) =>
       !!p.barcode &&
-      barcodesMatch(p.barcode, v) &&
       (opts.includeArchived ? true : !p.isArchived) &&
       (opts.includeDisabled ? true : p.barcodeEnabled !== false)
   );
-  return hit || null;
+  const exact = candidates.find(product => barcodesMatch(product.barcode!, v));
+  const alias = upcAlias(v);
+  return exact ?? (alias ? candidates.find(product => barcodesMatch(product.barcode!, alias)) : undefined) ?? null;
 };
 
 /** Duplicate protection: same business cannot reuse a barcode on another product. */
@@ -133,12 +145,11 @@ export const isBarcodeTaken = (
   barcode: string,
   excludeProductId?: string
 ): Product | null => {
-  const v = normalizeBarcode(barcode);
+  const v = normalizeScannedBarcode(barcode);
   if (!v) return null;
-  const hit = products.find(
-    (p) => !!p.barcode && barcodesMatch(p.barcode, v) && p.id !== excludeProductId
-  );
-  return hit || null;
+  return findProductByBarcode(products.filter(product => product.id !== excludeProductId), v, {
+    includeArchived: true, includeDisabled: true,
+  });
 };
 
 /** Full lookup used by every scan surface (inventory, billing, stock-in). */
@@ -147,9 +158,8 @@ export const lookupBarcode = (
   barcode: string,
   opts: LookupOptions = {}
 ): BarcodeLookupResult => {
-  const normalized = normalizeBarcode(barcode);
+  const normalized = normalizeScannedBarcode(barcode);
   const format = detectBarcodeFormat(normalized);
-  const valid = isBarcodeStructurallyValid(normalized);
   const anyMatch = findProductByBarcode(products, normalized, { ...opts, includeArchived: true, includeDisabled: true });
   const product = findProductByBarcode(products, normalized, opts);
   return {
@@ -157,8 +167,8 @@ export const lookupBarcode = (
     product,
     normalized,
     format,
-    valid,
-    archived: !!anyMatch?.isArchived,
+    valid: Boolean(anyMatch) || isBarcodeStructurallyValid(normalized),
+    archived: !product && Boolean(anyMatch?.isArchived),
   };
 };
 

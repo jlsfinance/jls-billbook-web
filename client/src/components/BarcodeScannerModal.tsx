@@ -1,266 +1,173 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X, Zap, ZapOff, AlertTriangle, RefreshCw, Keyboard } from 'lucide-react';
-import { normalizeBarcode } from '../services/barcodeService';
+import { useEffect, useRef, useState } from 'react';
+import type { IScannerControls } from '@zxing/browser';
+import { AlertTriangle, Keyboard, RefreshCw, ScanLine, Zap, ZapOff } from 'lucide-react';
+import { createCameraScanGate } from '../services/barcodeInput';
+import { normalizeScannedBarcode } from '../services/barcodeService';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 
 interface BarcodeScannerModalProps {
   open: boolean;
   onClose: () => void;
-  /** Called once per accepted scan. The modal stays open for continuous scanning. */
   onScan: (barcode: string) => void;
-  title?: string;
-  /** Ignore an identical barcode for this many ms (accidental repeat protection). */
-  debounceMs?: number;
+  onManualEntry: () => void;
+  continuous: boolean;
+  feedback?: { kind: 'ok' | 'warn' | 'err'; text: string } | null;
 }
 
-type CameraState = 'IDLE' | 'STARTING' | 'RUNNING' | 'DENIED' | 'UNSUPPORTED' | 'ERROR';
+function cameraError(error: unknown) {
+  const name = error instanceof Error ? error.name : '';
+  if (name === 'NotAllowedError' || name === 'SecurityError') return 'Camera access was blocked. Allow camera access for this site or enter the barcode.';
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'No matching camera was found. Try another camera or enter the barcode.';
+  if (name === 'NotReadableError' || name === 'AbortError') return 'The camera could not start. Close other apps using it and try again.';
+  return 'The camera could not start. Try again or enter the barcode.';
+}
 
-const HINT_DEVICES: { label: string; facingMode: string }[] = [
-  { label: 'Rear camera', facingMode: 'environment' },
-  { label: 'Front camera', facingMode: 'user' },
-];
+export default function BarcodeScannerModal({ open, onClose, onScan, onManualEntry, continuous, feedback }: BarcodeScannerModalProps) {
+  const [video, setVideo] = useState<HTMLVideoElement | null>(null);
+  const activeTrack = useRef<MediaStreamTrack | null>(null);
+  const callback = useRef(onScan);
+  callback.current = onScan;
 
-/**
- * Camera barcode scanner.
- *
- * @zxing/browser is imported lazily so it never lands in the initial bundle —
- * hardware-scanner users (the retail counter case) pay nothing for it.
- */
-const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
-  open,
-  onClose,
-  onScan,
-  title = 'Scan barcode',
-  debounceMs = 900,
-}) => {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const controlsRef = useRef<any>(null);
-  const lastScanRef = useRef<{ value: string; at: number }>({ value: '', at: 0 });
-
-  const [state, setState] = useState<CameraState>('IDLE');
-  const [errorMsg, setErrorMsg] = useState('');
+  const [state, setState] = useState<'STARTING' | 'RUNNING' | 'ERROR'>('STARTING');
+  const [error, setError] = useState('');
   const [torchOn, setTorchOn] = useState(false);
   const [torchAvailable, setTorchAvailable] = useState(false);
-  const [deviceIndex, setDeviceIndex] = useState(0);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [deviceId, setDeviceId] = useState('');
+  const [attempt, setAttempt] = useState(0);
   const [lastAccepted, setLastAccepted] = useState('');
-
-  const stop = useCallback(() => {
-    try {
-      controlsRef.current?.stop?.();
-    } catch {
-      /* already stopped */
-    }
-    controlsRef.current = null;
-  }, []);
-
-  const start = useCallback(
-    async (idx: number) => {
-      if (!videoRef.current) return;
-      stop();
-      setState('STARTING');
-      setErrorMsg('');
-      setTorchOn(false);
-      setTorchAvailable(false);
-
-      try {
-        const mod = await import('@zxing/browser');
-        const reader = new mod.BrowserMultiFormatReader();
-        const devices = await mod.BrowserCodeReader.listVideoInputDevices();
-
-        // Prefer the rear camera on mobile: it is the one pointed at the label.
-        let deviceId: string | undefined;
-        if (devices.length > 1) {
-          const wanted = HINT_DEVICES[idx % HINT_DEVICES.length];
-          const preferred =
-            devices.find(d => (d.label || '').toLowerCase().includes(wanted.facingMode === 'environment' ? 'back' : 'front')) ||
-            devices.find(d => (d.label || '').toLowerCase().includes(wanted.facingMode === 'environment' ? 'rear' : 'user'));
-          deviceId = (preferred || devices[devices.length - 1]).deviceId;
-        } else {
-          deviceId = devices[0]?.deviceId;
-        }
-
-        const controls = await reader.decodeFromVideoDevice(
-          deviceId,
-          videoRef.current,
-          (result) => {
-            if (!result) return;
-            const value = normalizeBarcode(result.getText());
-            if (!value) return;
-            const now = Date.now();
-            const last = lastScanRef.current;
-            if (last.value === value && now - last.at < debounceMs) return; // repeat guard
-            lastScanRef.current = { value, at: now };
-            setLastAccepted(value);
-            onScan(value);
-          }
-        );
-
-        controlsRef.current = controls;
-        setState('RUNNING');
-
-        // Torch support is device dependent and only known after the track exists.
-        try {
-          const stream = (videoRef.current?.srcObject as MediaStream) || null;
-          const track = stream?.getVideoTracks?.()[0];
-          const caps = (track?.getCapabilities?.() || {}) as { torch?: boolean };
-          setTorchAvailable(!!caps.torch);
-        } catch {
-          setTorchAvailable(false);
-        }
-      } catch (err: unknown) {
-        const e = err as { name?: string; message?: string };
-        if (e?.name === 'NotAllowedError' || e?.name === 'SecurityError') {
-          setState('DENIED');
-          setErrorMsg('Camera permission nahi mili. USB scanner ya barcode manually enter karein.');
-        } else if (e?.name === 'NotFoundError' || e?.name === 'OverconstrainedError') {
-          setState('UNSUPPORTED');
-          setErrorMsg('Is device par camera nahi mila. Hardware scanner/manual entry use karein.');
-        } else if (e?.name === 'NotSupportedError' || typeof navigator === 'undefined' || !navigator.mediaDevices) {
-          setState('UNSUPPORTED');
-          setErrorMsg('Is browser me camera scan available nahi. Hardware scanner/manual entry use karein.');
-        } else {
-          setState('ERROR');
-          setErrorMsg(e?.message || 'Camera start nahi ho paya.');
-        }
-      }
-    },
-    [debounceMs, onScan, stop]
-  );
 
   useEffect(() => {
     if (!open) {
-      stop();
-      setState('IDLE');
       setLastAccepted('');
       return;
     }
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      setState('UNSUPPORTED');
-      setErrorMsg('Is browser me camera scan available nahi. Hardware scanner/manual entry use karein.');
-      return;
+    if (!video) return;
+    const preview = video;
+    let active = true;
+    let stream: MediaStream | undefined;
+    let controls: IScannerControls | undefined;
+    const accept = createCameraScanGate();
+    let finished = false;
+
+    function stop() {
+      controls?.stop();
+      controls = undefined;
+      stream?.getTracks().forEach(track => track.stop());
+      if (preview.srcObject === stream) preview.srcObject = null;
+      if (activeTrack.current && stream?.getVideoTracks().includes(activeTrack.current)) activeTrack.current = null;
+      stream = undefined;
     }
-    void start(deviceIndex);
-    return () => stop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
 
-  useEffect(() => () => stop(), [stop]);
-
-  const toggleTorch = async () => {
-    try {
-      const next = !torchOn;
-      await controlsRef.current?.switchTorch?.(next);
-      setTorchOn(next);
-    } catch {
+    async function start() {
+      setState('STARTING');
+      setError('');
+      setTorchOn(false);
       setTorchAvailable(false);
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setState('ERROR');
+        setError('Camera scanning needs a secure browser page with camera support. You can enter a barcode instead.');
+        return;
+      }
+
+      try {
+        const { BrowserMultiFormatReader } = await import('@zxing/browser');
+        if (!active) return;
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } }),
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        });
+        if (!active) { stop(); return; }
+        const track = stream.getVideoTracks()[0];
+        if (!track) throw new Error('No video track');
+        activeTrack.current = track;
+        track.addEventListener('ended', () => {
+          if (!active) return;
+          stop();
+          setTorchAvailable(false);
+          setState('ERROR');
+          setError('The camera stopped. Try again or enter the barcode.');
+        }, { once: true });
+
+        preview.srcObject = stream;
+        const reader = new BrowserMultiFormatReader(undefined, { delayBetweenScanSuccess: 150, delayBetweenScanAttempts: 100 });
+        controls = await reader.decodeFromVideoElement(preview, result => {
+          if (!active || finished || !result) return;
+          const value = normalizeScannedBarcode(result.getText());
+          if (!value || !accept(value, performance.now())) return;
+          if (!continuous) finished = true;
+          setLastAccepted(value);
+          callback.current(value);
+        });
+        if (!active || finished) { stop(); return; }
+        setState('RUNNING');
+        const caps = track.getCapabilities?.() as (MediaTrackCapabilities & { torch?: boolean }) | undefined;
+        setTorchAvailable(caps?.torch === true);
+        const available = await navigator.mediaDevices.enumerateDevices?.().catch(() => []) ?? [];
+        if (active) setDevices(available.filter(device => device.kind === 'videoinput' && device.deviceId));
+      } catch (problem) {
+        stop();
+        if (!active) return;
+        setState('ERROR');
+        setError(cameraError(problem));
+      }
     }
-  };
 
-  return (
-    <AnimatePresence>
-      {open && (
-        <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center">
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-          />
-          <motion.div
-            initial={{ y: 60, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 60, opacity: 0 }}
-            className="relative w-full sm:max-w-lg bg-surface rounded-t-[32px] sm:rounded-[32px] overflow-hidden border border-border shadow-google-lg"
-          >
-            <div className="flex items-center justify-between px-6 pt-5 pb-3">
-              <h3 className="text-lg font-black font-heading text-foreground">{title}</h3>
-              <button
-                onClick={onClose}
-                aria-label="Close scanner"
-                className="w-10 h-10 rounded-full bg-surface-container-high flex items-center justify-center text-foreground"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+    void start();
+    return () => { active = false; stop(); };
+  }, [open, video, deviceId, attempt, continuous]);
 
-            <div className="relative mx-6 rounded-[24px] overflow-hidden bg-black aspect-[4/3]">
-              <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
+  async function toggleTorch() {
+    const track = activeTrack.current;
+    if (!track) return;
+    try {
+      const torch = !torchOn;
+      await track.applyConstraints({ advanced: [{ torch } as MediaTrackConstraintSet] });
+      if (track === activeTrack.current) setTorchOn(torch);
+    } catch {
+      if (track === activeTrack.current) setTorchAvailable(false);
+    }
+  }
 
-              {state === 'RUNNING' && (
-                <>
-                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                    <div className="w-[78%] h-[42%] border-2 border-white/80 rounded-2xl shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
-                  </div>
-                  <div className="absolute bottom-3 left-0 right-0 text-center">
-                    <span className="inline-block px-3 py-1.5 rounded-full bg-black/60 text-white text-[11px] font-bold">
-                      Barcode ko frame ke andar rakhein
-                    </span>
-                  </div>
-                </>
-              )}
-
-              {state !== 'RUNNING' && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-6">
-                  {state === 'STARTING' ? (
-                    <>
-                      <RefreshCw className="w-8 h-8 text-white/80 animate-spin" />
-                      <p className="text-white/90 text-sm font-bold">Camera start ho raha hai…</p>
-                    </>
-                  ) : (
-                    <>
-                      <AlertTriangle className="w-9 h-9 text-amber-400" />
-                      <p className="text-white/90 text-sm font-bold leading-relaxed">
-                        {errorMsg || 'Camera available nahi hai.'}
-                      </p>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="px-6 pt-4 pb-6 space-y-3">
-              {lastAccepted && (
-                <div className="rounded-2xl bg-google-green/10 border border-google-green/20 px-4 py-2.5">
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-google-green">Last scan</p>
-                  <p className="text-sm font-bold text-foreground font-mono break-all">{lastAccepted}</p>
-                </div>
-              )}
-
-              <div className="flex gap-3">
-                {torchAvailable && (
-                  <button
-                    onClick={toggleTorch}
-                    className="flex-1 py-3.5 rounded-full bg-surface-container-high font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2"
-                  >
-                    {torchOn ? <ZapOff className="w-4 h-4" /> : <Zap className="w-4 h-4" />}
-                    {torchOn ? 'Torch off' : 'Torch on'}
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    const next = deviceIndex + 1;
-                    setDeviceIndex(next);
-                    void start(next);
-                  }}
-                  className="flex-1 py-3.5 rounded-full bg-surface-container-high font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2"
-                >
-                  <RefreshCw className="w-4 h-4" /> Camera badlein
-                </button>
-              </div>
-
-              <p className="text-[11px] font-bold text-muted-foreground flex items-start gap-2 leading-relaxed">
-                <Keyboard className="w-4 h-4 mt-0.5 shrink-0" />
-                Camera kaam na kare to USB/Bluetooth scanner se seedha scan karein — page ka barcode box
-                hamesha sun raha hai.
-              </p>
-            </div>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
-  );
-};
-
-export default BarcodeScannerModal;
+  return <Dialog open={open} onOpenChange={next => { if (!next) onClose(); }}>
+    <DialogContent className="z-[300] max-h-[90dvh] w-11/12 max-w-lg overflow-y-auto rounded-2xl">
+      <DialogHeader>
+        <DialogTitle>Scan barcode</DialogTitle>
+        <DialogDescription>{continuous ? 'Move the label away and back to scan the same item again.' : 'Scan the label to fill the barcode field.'}</DialogDescription>
+      </DialogHeader>
+      <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-black">
+        <video ref={setVideo} className="h-full w-full object-contain" playsInline muted />
+        {state === 'RUNNING'
+          ? <div aria-hidden="true" className="pointer-events-none absolute inset-0 grid place-items-center">
+            <div className="h-[40%] w-[80%] rounded-lg border-2 border-white/80 shadow-[0_0_0_999px_rgba(0,0,0,0.25)]" />
+          </div>
+          : <div role={state === 'ERROR' ? 'alert' : 'status'} className="absolute inset-0 grid place-content-center justify-items-center gap-3 px-4 text-center text-sm font-medium text-white">
+            {state === 'STARTING' ? <RefreshCw className="animate-spin" /> : <AlertTriangle className="text-amber-300" />}
+            {state === 'STARTING' ? 'Starting camera…' : error}
+          </div>}
+      </div>
+      {lastAccepted && <div role="status" className="rounded-xl border px-3 py-2 text-sm">
+        <div className="flex items-center gap-2 break-all font-mono"><ScanLine size={16} className="shrink-0" /> {lastAccepted}</div>
+        {feedback &&
+          <p className={`mt-1 ${feedback.kind === 'ok' ? 'text-emerald-600' : 'text-amber-700 dark:text-amber-300'}`}>{feedback.text}</p>}
+      </div>}
+      <div className="flex flex-wrap gap-2">
+        {devices.length > 1 && <select aria-label="Camera" value={deviceId} onChange={event => setDeviceId(event.target.value)} className="min-w-0 max-w-full rounded-lg border bg-background p-2 text-sm">
+          <option value="">Automatic camera</option>
+          {devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}
+        </select>}
+        {torchAvailable && <button type="button" aria-pressed={torchOn} onClick={() => void toggleTorch()} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+          {torchOn ? <ZapOff size={16} /> : <Zap size={16} />} {torchOn ? 'Torch off' : 'Torch on'}
+        </button>}
+        {state === 'ERROR' && <button type="button" onClick={() => setAttempt(value => value + 1)} className="rounded-lg border px-3 py-2 text-sm">Retry camera</button>}
+        <button type="button" onClick={onManualEntry} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+          <Keyboard size={16} /> Enter barcode
+        </button>
+      </div>
+    </DialogContent>
+  </Dialog>;
+}

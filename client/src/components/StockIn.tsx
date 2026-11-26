@@ -380,6 +380,8 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
             label="Scan barcode — pehla aur main action"
             autoFocus
             onScan={handleScan}
+            continuous
+            cameraFeedback={statusMsg}
             hint="Ek hi session me jitne products chahiye scan karte jayein."
             lastScanMessage={lastScan ? `Last scan: ${lastScan}` : undefined}
           />
