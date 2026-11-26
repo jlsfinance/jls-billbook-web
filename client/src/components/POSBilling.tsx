@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Search, Plus, Minus, Trash2, Printer, CheckCircle2, Barcode } from 'lucide-react';
 import { Invoice, InvoiceItem, Product } from '../types';
 import { StorageService } from '../services/storageService';
@@ -13,7 +13,7 @@ interface POSBillingProps {
 
 export const POSBilling: React.FC<POSBillingProps> = ({ onBack }) => {
   const company = StorageService.getCompanyProfile();
-  const products = useMemo(() => StorageService.getProducts().filter((p) => !p.isArchived), []);
+  const products = StorageService.getProducts().filter((p) => !p.isArchived);
   const customers = useMemo(() => StorageService.getCustomers(), []);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<string>('ALL');
@@ -23,7 +23,9 @@ export const POSBilling: React.FC<POSBillingProps> = ({ onBack }) => {
   const [splitCash, setSplitCash] = useState<string>('');
   const [splitOnline, setSplitOnline] = useState<string>('');
   const [savedInvoice, setSavedInvoice] = useState<Invoice | null>(null);
-  const [scanFeedback, setScanFeedback] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string } | null>(null);
+  const [scanFeedback, setScanFeedback] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string; itemId?: string } | null>(null);
+  const checkoutLocked = useRef(false);
+  useEffect(() => { if (!cart.length) checkoutLocked.current = false; }, [cart.length]);
 
   const categories = useMemo(() => {
     const set = new Set<string>(['ALL']);
@@ -114,7 +116,8 @@ export const POSBilling: React.FC<POSBillingProps> = ({ onBack }) => {
   }, [cart]);
 
   const handleCheckout = (printAfter: boolean) => {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || checkoutLocked.current) return false;
+    checkoutLocked.current = true;
     let cust = customers.find((c) => c.id === selectedCustomerId);
     if (!cust) {
       cust = customers.find((c) => c.name.toUpperCase() === 'CASH');
@@ -165,12 +168,19 @@ export const POSBilling: React.FC<POSBillingProps> = ({ onBack }) => {
       accountId: paymentMode === 'CASH' ? 'cash_default' : 'bank_default',
     };
 
-    StorageService.saveInvoice(inv);
+    const saved = StorageService.saveInvoice(inv);
+    if (!saved.ok) {
+      checkoutLocked.current = false;
+      setScanFeedback({ kind: 'err', text: saved.error || 'Bill could not be saved. Try again.' });
+      return false;
+    }
     HapticService.heavy();
     setCart([]);
     setSplitCash('');
     setSplitOnline('');
+    setScanFeedback({ kind: 'ok', text: `Bill ${inv.invoiceNumber} saved.` });
     if (printAfter) setSavedInvoice(inv);
+    return true;
   };
 
   return (
@@ -208,19 +218,30 @@ export const POSBilling: React.FC<POSBillingProps> = ({ onBack }) => {
               label="Quick Scan"
               placeholder="Scan barcode to add directly..."
               continuous
+              linkUnmatched
               cameraFeedback={scanFeedback}
+              scanDraft={{
+                title: 'Current bill',
+                lines: cart.map(item => ({ id: item.productId, name: item.description, quantity: item.quantity, amount: item.totalAmount ?? item.baseAmount })),
+                total: totals.total,
+                totalLabel: `Bill total · ${paymentMode === 'ONLINE' ? 'UPI / card' : paymentMode === 'CREDIT' ? 'Credit' : 'Cash'}`,
+              }}
+              finalize={{ label: 'Save bill', run: () => handleCheckout(false) }}
               onScan={(code) => {
                 const result = lookupBarcode(StorageService.getProducts(), code);
                 if (result.product) {
                   addItem(result.product);
-                  setScanFeedback({ kind: 'ok', text: `${result.product.name} added to the bill.` });
+                  setScanFeedback({ kind: 'ok', text: `${result.product.name} · 1 added`, itemId: result.product.id });
+                  return 'added';
                 } else if (result.archived) {
                   setScanFeedback({ kind: 'warn', text: 'This item is archived. Restore it in Items before billing.' });
+                  return 'rejected';
                 } else {
                   setScanFeedback({
                     kind: 'warn',
                     text: result.valid ? `No active item is linked to ${code}.` : 'Invalid barcode. Check the label and try again.',
                   });
+                  return result.valid && !StorageService.isBarcodeTaken(code) ? 'unlinked' : 'rejected';
                 }
               }}
             />

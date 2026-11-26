@@ -6,18 +6,19 @@
 class SoundServiceClass {
     private audioContext: AudioContext | null = null;
 
-    constructor() {
-        // Initialize AudioContext on user interaction
-        if (typeof window !== 'undefined') {
-            this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    private getContext() {
+        const Audio = typeof window === 'undefined' ? undefined : window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!this.audioContext && Audio) {
+            try { this.audioContext = new Audio(); } catch { return null; }
         }
+        return this.audioContext;
     }
 
     /**
      * Play a success sound (sweet melody for save)
      */
     playSuccess() {
-        if (!this.audioContext) return;
+        if (!this.getContext() || !this.audioContext) return;
 
         const now = this.audioContext.currentTime;
 
@@ -48,7 +49,7 @@ class SoundServiceClass {
      * Play a delete sound (descending tone)
      */
     playDelete() {
-        if (!this.audioContext) return;
+        if (!this.getContext() || !this.audioContext) return;
 
         const now = this.audioContext.currentTime;
 
@@ -77,7 +78,7 @@ class SoundServiceClass {
      * Play error sound
      */
     playError() {
-        if (!this.audioContext) return;
+        if (!this.getContext() || !this.audioContext) return;
 
         const now = this.audioContext.currentTime;
 
@@ -105,7 +106,7 @@ class SoundServiceClass {
      * Play notification sound (subtle ping)
      */
     playNotification() {
-        if (!this.audioContext) return;
+        if (!this.getContext() || !this.audioContext) return;
 
         const now = this.audioContext.currentTime;
 
@@ -130,9 +131,28 @@ class SoundServiceClass {
      * Ensure AudioContext is resumed (required by some browsers)
      */
     async resume() {
-        if (this.audioContext && this.audioContext.state === 'suspended') {
-            await this.audioContext.resume();
-        }
+        const audio = this.getContext();
+        if (audio && audio.state !== 'running' && audio.state !== 'closed') await audio.resume().catch(() => {});
+    }
+
+    playScan(accepted: boolean) {
+        const audio = this.getContext();
+        if (audio?.state !== 'running') return;
+        const oscillator = audio.createOscillator();
+        const gain = audio.createGain();
+        const now = audio.currentTime;
+        const end = now + (accepted ? 0.085 : 0.12);
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(accepted ? 1180 : 430, now);
+        if (!accepted) oscillator.frequency.exponentialRampToValueAtTime(260, end);
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(accepted ? 0.23 : 0.16, now + 0.008);
+        gain.gain.exponentialRampToValueAtTime(0.001, end);
+        oscillator.connect(gain);
+        gain.connect(audio.destination);
+        oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
+        oscillator.start(now);
+        oscillator.stop(end);
     }
 }
 

@@ -158,7 +158,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
     setItems([...items, { productId: '', description: '', quantity: 1, rate: 0, baseAmount: 0, hsn: '', gstRate: 0, cgstAmount: 0, sgstAmount: 0, igstAmount: 0, totalAmount: 0 }]);
   };
 
-  const calculateTaxes = (item: InvoiceItem, supplier: any, customer: any) => {
+  const calculateTaxes = (item: InvoiceItem, supplier: any, customer: any, applyGst = true) => {
     let baseAmount = item.quantity * item.rate;
     // Apply Item Discount if present
     if (item.discountValue && item.discountValue > 0) {
@@ -177,7 +177,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
     // Ensure baseAmount is not negative
     if (baseAmount < 0) baseAmount = 0;
 
-    const gstRate = item.gstRate || 0;
+    const gstRate = applyGst ? item.gstRate || 0 : 0;
     const taxType = supplier?.state === customer?.state ? 'INTRA_STATE' : 'INTER_STATE';
 
     if (taxType === 'INTRA_STATE') {
@@ -515,7 +515,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
   // ---------------------------------------------------------------
   // Barcode scanning (PRD §7.3): scan -> item added; rescan -> quantity +1
   // ---------------------------------------------------------------
-  const [scanMsg, setScanMsg] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string } | null>(null);
+  const [scanMsg, setScanMsg] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string; itemId?: string } | null>(null);
   const [lastScannedId, setLastScannedId] = useState<string | null>(null);
 
   /**
@@ -537,9 +537,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
         const copy = [...prev];
         const item = { ...copy[existingIndex] };
         item.quantity = Number(item.quantity) + 1;
-        item.baseAmount = item.quantity * item.rate;
-        if (gstEnabled) calculateTaxes(item, supplier, customer);
-        else item.totalAmount = item.baseAmount;
+        calculateTaxes(item, supplier, customer, gstEnabled);
         copy[existingIndex] = item;
         return copy;
       }
@@ -555,6 +553,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
         barcodeSnapshot: barcodeSnapshot || product.barcode,
         description: product.name,
         quantity: 1,
+        unit: product.unit || 'pcs',
         rate: rateToUse,
         baseAmount: rateToUse,
         hsn: product.hsn || '',
@@ -564,8 +563,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
         igstAmount: 0,
         totalAmount: rateToUse,
       };
-      if (gstEnabled) calculateTaxes(newItem, supplier, customer);
-      else newItem.totalAmount = newItem.baseAmount;
+      calculateTaxes(newItem, supplier, customer, gstEnabled);
 
       return [...prev, newItem];
     });
@@ -588,18 +586,18 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
 
     if (!result.valid) {
       setScanMsg({ kind: 'err', text: 'Barcode format/value valid nahi hai.' });
-      return;
+      return 'rejected' as const;
     }
     if (result.archived) {
       setScanMsg({ kind: 'warn', text: 'Product archived hai. Restore karke use karein.' });
-      return;
+      return 'rejected' as const;
     }
     if (!result.found || !result.product) {
       setScanMsg({
         kind: 'warn',
-        text: `Ye barcode (${barcode}) kisi product se linked nahi hai. Inventory > Scan & Add Stock se create karein.`,
+        text: `Barcode ${barcode} kisi item se linked nahi hai.`,
       });
-      return;
+      return StorageService.isBarcodeTaken(barcode) ? 'rejected' as const : 'unlinked' as const;
     }
 
     const product = result.product;
@@ -612,7 +610,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
     setScanMsg({
       kind: available <= 0 ? 'warn' : 'ok',
       text: `${product.name} ka 1 unit bill mein add hua.${stockNote}`,
+      itemId: product.id,
     });
+    return 'added' as const;
   };
 
   /** Undo the most recent scan (PRD §14: undo last scan). */
@@ -626,9 +626,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
       const copy = [...items];
       const updated = { ...copy[idx] };
       updated.quantity = Number(updated.quantity) - 1;
-      updated.baseAmount = updated.quantity * updated.rate;
-      if (gstEnabled) calculateTaxes(updated, company, customers.find(c => c.id === selectedCustomerId));
-      else updated.totalAmount = updated.baseAmount;
+      calculateTaxes(updated, company, customers.find(c => c.id === selectedCustomerId), gstEnabled);
       copy[idx] = updated;
       setItems(copy);
       setScanMsg({ kind: 'ok', text: `${updated.description} — quantity ${updated.quantity} ho gayi.` });
@@ -1305,10 +1303,27 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
               placeholder="Barcode scan karein…"
               onScan={handleBarcodeScan}
               continuous
+              linkUnmatched
               cameraFeedback={scanMsg}
+              scanDraft={{
+                title: 'Current bill',
+                lines: items.filter(item => item.productId && Number(item.quantity) > 0).map((item, index) => ({
+                  id: `${item.productId}:${index}`,
+                  productId: item.productId,
+                  name: item.description,
+                  quantity: Number(item.quantity),
+                  amount: item.totalAmount ?? item.baseAmount,
+                })),
+                total: calculateRoundedTotal(),
+              }}
+              finalize={customers.some(customer => customer.id === selectedCustomerId) ? {
+                label: 'Save bill',
+                run: () => { handleSubmit(); return true; },
+              } : undefined}
             />
             {scanMsg && (
               <div
+                role="status"
                 className={`mt-2 rounded-xl px-3 py-2 text-[12px] font-bold ${
                   scanMsg.kind === 'ok'
                     ? 'bg-google-green/10 text-google-green'

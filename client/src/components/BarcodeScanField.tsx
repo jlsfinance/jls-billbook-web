@@ -1,14 +1,17 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ChangeEvent, KeyboardEvent } from 'react';
 import { ScanLine, Camera, X, CheckCircle2 } from 'lucide-react';
-import { normalizeScannedBarcode, SCAN_IDLE_MS } from '../services/barcodeService';
+import { isBarcodeStructurallyValid, normalizeScannedBarcode, SCAN_IDLE_MS } from '../services/barcodeService';
 import type { BarcodeSource } from '../services/barcodeService';
 import { isScannerBurst, recordBarcodeInput } from '../services/barcodeInput';
 import type { BarcodeBurst } from '../services/barcodeInput';
 import BarcodeScannerModal from './BarcodeScannerModal';
+import type { ScanDraft, ScanOutcome } from './BarcodeScannerModal';
+import { SoundService } from '../services/soundService';
+import { StorageService } from '../services/storageService';
 
 export interface BarcodeScanFieldProps {
-  onScan: (barcode: string, source: BarcodeSource) => void;
+  onScan: (barcode: string, source: BarcodeSource) => ScanOutcome | void;
   label?: string;
   placeholder?: string;
   autoFocus?: boolean;
@@ -17,7 +20,10 @@ export interface BarcodeScanFieldProps {
   lastScanMessage?: string;
   enableCamera?: boolean;
   continuous?: boolean;
-  cameraFeedback?: { kind: 'ok' | 'warn' | 'err'; text: string } | null;
+  cameraFeedback?: { kind: 'ok' | 'warn' | 'err'; text: string; itemId?: string } | null;
+  scanDraft?: ScanDraft;
+  finalize?: { label: string; run: () => boolean };
+  linkUnmatched?: boolean;
   className?: string;
   inputClassName?: string;
 }
@@ -27,6 +33,7 @@ const emptyInput: BarcodeBurst = { value: '', lastAt: 0, characters: 0 };
 export default function BarcodeScanField({
   onScan, label = 'Barcode', placeholder = 'Scan or enter a barcode', autoFocus = false,
   disabled = false, hint, lastScanMessage, enableCamera = true, continuous = false, cameraFeedback,
+  scanDraft, finalize, linkUnmatched = false,
   className = '', inputClassName = '',
 }: BarcodeScanFieldProps) {
   const id = useId();
@@ -41,12 +48,24 @@ export default function BarcodeScanField({
   const [cameraOpen, setCameraOpen] = useState(false);
   const [flash, setFlash] = useState(false);
   const [error, setError] = useState('');
+  const [soundOn, setSoundOn] = useState(true);
 
   function clear() {
     window.clearTimeout(idleTimer.current);
     buffer.current = emptyInput;
     setValue('');
     setError('');
+  }
+
+  function accept(code: string, source: BarcodeSource): ScanOutcome {
+    const outcome = callback.current(code, source) ?? 'added';
+    if (soundOn) SoundService.playScan(outcome === 'added');
+    if (outcome === 'added') {
+      setFlash(true);
+      window.clearTimeout(flashTimer.current);
+      flashTimer.current = window.setTimeout(() => setFlash(false), 600);
+    }
+    return outcome;
   }
 
   function submit() {
@@ -59,10 +78,8 @@ export default function BarcodeScanField({
       return;
     }
     clear();
-    setFlash(true);
-    window.clearTimeout(flashTimer.current);
-    flashTimer.current = window.setTimeout(() => setFlash(false), 600);
-    callback.current(code, isScannerBurst(current) ? 'USB' : 'MANUAL');
+    if (soundOn) void SoundService.resume();
+    accept(code, isScannerBurst(current) ? 'USB' : 'MANUAL');
   }
 
   function change(event: ChangeEvent<HTMLInputElement>) {
@@ -81,6 +98,7 @@ export default function BarcodeScanField({
 
   function keyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.nativeEvent.isComposing) return;
+    if (soundOn) void SoundService.resume();
     if (event.key === 'Enter' || (event.key === 'Tab' && isScannerBurst(buffer.current))) {
       event.preventDefault();
       submit();
@@ -90,6 +108,15 @@ export default function BarcodeScanField({
   function closeCamera(focusBarcode: boolean) {
     setCameraOpen(false);
     requestAnimationFrame(() => (focusBarcode ? inputRef.current : cameraButtonRef.current)?.focus());
+  }
+
+  function linkBarcode(code: string, productId: string) {
+    const item = StorageService.getProducts().find(product => product.id === productId && !product.isArchived && !product.barcode);
+    if (!item || !isBarcodeStructurallyValid(code)) return 'Choose an active item without a barcode.';
+    if (StorageService.isBarcodeTaken(code)) return 'This barcode is already linked. Scan it again to look it up.';
+    StorageService.updateProduct({ ...item, barcode: code, barcodeEnabled: true });
+    const outcome = accept(code, 'CAMERA');
+    return outcome === 'added' ? null : 'Barcode linked. Scan the label again to add the item.';
   }
 
   useEffect(() => {
@@ -115,7 +142,7 @@ export default function BarcodeScanField({
           {flash ? <CheckCircle2 size={18} className="text-emerald-600" /> : <ScanLine size={18} />}
         </div>
         <input id={id} ref={inputRef} value={value} disabled={disabled} inputMode="text" autoComplete="off" spellCheck={false}
-          placeholder={placeholder} onChange={change} onKeyDown={keyDown} onBlur={() => window.clearTimeout(idleTimer.current)}
+          placeholder={placeholder} onPointerDown={() => { if (soundOn) void SoundService.resume(); }} onChange={change} onKeyDown={keyDown} onBlur={() => window.clearTimeout(idleTimer.current)}
           className={`w-full rounded-xl border bg-background py-3 pl-10 pr-9 font-mono text-sm outline-none focus:ring-2 focus:ring-primary/40 ${inputClassName}`} />
         {value && <button type="button" aria-label="Clear barcode" onClick={() => { clear(); inputRef.current?.focus(); }}
           className="absolute inset-y-0 right-2 p-1 text-muted-foreground"><X size={16} /></button>}
@@ -123,18 +150,31 @@ export default function BarcodeScanField({
       {value && <button type="button" disabled={disabled} onClick={submit} className="rounded-xl border px-3 text-sm font-semibold">Use code</button>}
       {enableCamera && <button ref={cameraButtonRef} type="button" disabled={disabled} aria-label="Open camera scanner" onClick={() => {
         window.clearTimeout(idleTimer.current);
+        if (soundOn) void SoundService.resume();
         setCameraOpen(true);
       }} className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
-        <Camera size={18} /><span className="hidden sm:inline">Camera</span>
+        <Camera size={18} /><span>{continuous ? 'Scan items' : 'Camera'}</span>
       </button>}
     </div>
     {error ? <p role="alert" className="px-1 text-xs text-red-600 dark:text-red-400">{error}</p>
       : <p className="px-1 text-xs text-muted-foreground">{lastScanMessage || hint || 'Type a code and press Enter. Keep this field focused for a USB or Bluetooth scanner.'}</p>}
     <BarcodeScannerModal open={cameraOpen && !disabled} continuous={continuous} feedback={cameraFeedback}
+      draft={scanDraft} soundOn={soundOn} onToggleSound={() => {
+        if (!soundOn) void SoundService.resume();
+        setSoundOn(!soundOn);
+      }}
+      onFinalize={finalize && { label: finalize.label, run: () => {
+        if (finalize.run()) closeCamera(false);
+      } }}
+      linking={linkUnmatched ? {
+        items: () => StorageService.getProducts().filter(product => !product.isArchived && !product.barcode),
+        link: linkBarcode,
+      } : undefined}
       onClose={() => closeCamera(false)} onManualEntry={() => closeCamera(true)} onScan={code => {
         clear();
-        if (!continuous) closeCamera(true);
-        callback.current(code, 'CAMERA');
+        const outcome = accept(code, 'CAMERA');
+        if (!continuous && outcome === 'added') closeCamera(true);
+        return outcome;
       }} />
   </div>;
 }

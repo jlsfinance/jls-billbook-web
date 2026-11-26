@@ -1,18 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 import type { IScannerControls } from '@zxing/browser';
-import { AlertTriangle, Keyboard, RefreshCw, ScanLine, Zap, ZapOff } from 'lucide-react';
+import { AlertTriangle, Check, Keyboard, RefreshCw, ScanLine, Volume2, VolumeX, Zap, ZapOff } from 'lucide-react';
 import { createCameraScanGate } from '../services/barcodeInput';
 import { normalizeScannedBarcode } from '../services/barcodeService';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 
+export type ScanOutcome = 'added' | 'unlinked' | 'rejected';
+export type ScanDraft = {
+  title: string;
+  lines: { id: string; productId?: string; name: string; quantity: number; amount?: number }[];
+  total: number;
+  totalLabel?: string;
+};
+
 interface BarcodeScannerModalProps {
   open: boolean;
   onClose: () => void;
-  onScan: (barcode: string) => void;
+  onScan: (barcode: string) => ScanOutcome;
   onManualEntry: () => void;
   continuous: boolean;
-  feedback?: { kind: 'ok' | 'warn' | 'err'; text: string } | null;
+  feedback?: { kind: 'ok' | 'warn' | 'err'; text: string; itemId?: string } | null;
+  draft?: ScanDraft;
+  soundOn: boolean;
+  onToggleSound: () => void;
+  onFinalize?: { label: string; run: () => void };
+  linking?: { items: () => { id: string; name: string }[]; link: (code: string, productId: string) => string | null };
 }
+const currency = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
 
 function cameraError(error: unknown) {
   const name = error instanceof Error ? error.name : '';
@@ -22,7 +36,9 @@ function cameraError(error: unknown) {
   return 'The camera could not start. Try again or enter the barcode.';
 }
 
-export default function BarcodeScannerModal({ open, onClose, onScan, onManualEntry, continuous, feedback }: BarcodeScannerModalProps) {
+export default function BarcodeScannerModal({
+  open, onClose, onScan, onManualEntry, continuous, feedback, draft, soundOn, onToggleSound, onFinalize, linking,
+}: BarcodeScannerModalProps) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const activeTrack = useRef<MediaStreamTrack | null>(null);
   const callback = useRef(onScan);
@@ -35,11 +51,23 @@ export default function BarcodeScannerModal({ open, onClose, onScan, onManualEnt
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState('');
   const [attempt, setAttempt] = useState(0);
-  const [lastAccepted, setLastAccepted] = useState('');
+  const [lastScan, setLastScan] = useState<{ code: string; outcome: ScanOutcome }>();
+  const scanPaused = useRef(false);
+  const [linkCode, setLinkCode] = useState('');
+  const [productId, setProductId] = useState('');
+  const [linkError, setLinkError] = useState('');
+
+  function cancelLink() {
+    scanPaused.current = false;
+    setLinkCode('');
+    setProductId('');
+    setLinkError('');
+  }
 
   useEffect(() => {
     if (!open) {
-      setLastAccepted('');
+      setLastScan(undefined);
+      cancelLink();
       return;
     }
     if (!video) return;
@@ -94,14 +122,14 @@ export default function BarcodeScannerModal({ open, onClose, onScan, onManualEnt
         }, { once: true });
 
         preview.srcObject = stream;
-        const reader = new BrowserMultiFormatReader(undefined, { delayBetweenScanSuccess: 150, delayBetweenScanAttempts: 100 });
+        const reader = new BrowserMultiFormatReader(undefined, { delayBetweenScanSuccess: 95, delayBetweenScanAttempts: 85 });
         controls = await reader.decodeFromVideoElement(preview, result => {
           if (!active || finished || !result) return;
           const value = normalizeScannedBarcode(result.getText());
-          if (!value || !accept(value, performance.now())) return;
-          if (!continuous) finished = true;
-          setLastAccepted(value);
-          callback.current(value);
+          if (!value || !accept(value, performance.now()) || scanPaused.current) return;
+          const outcome = callback.current(value);
+          if (!continuous && outcome === 'added') finished = true;
+          setLastScan({ code: value, outcome });
         });
         if (!active || finished) { stop(); return; }
         setState('RUNNING');
@@ -133,13 +161,20 @@ export default function BarcodeScannerModal({ open, onClose, onScan, onManualEnt
     }
   }
 
+  const linkItems = linkCode ? linking?.items() ?? [] : [];
+  const units = draft?.lines.reduce((count, line) => count + line.quantity, 0) ?? 0;
+  const shownLines = draft?.lines.filter(line => line.quantity > 0) ?? [];
+  const highlighted = lastScan?.outcome === 'added' ? shownLines.find(line => (line.productId ?? line.id) === feedback?.itemId) : undefined;
+  const orderedLines = highlighted ? [highlighted, ...shownLines.filter(line => line.id !== highlighted.id)] : shownLines;
+
   return <Dialog open={open} onOpenChange={next => { if (!next) onClose(); }}>
-    <DialogContent className="z-[300] max-h-[90dvh] w-11/12 max-w-lg overflow-y-auto rounded-2xl">
-      <DialogHeader>
-        <DialogTitle>Scan barcode</DialogTitle>
-        <DialogDescription>{continuous ? 'Move the label away and back to scan the same item again.' : 'Scan the label to fill the barcode field.'}</DialogDescription>
+    <DialogContent className="z-[300] flex max-h-[94dvh] w-[calc(100%_-_1rem)] max-w-lg flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:w-11/12">
+      <DialogHeader className="px-4 pb-2 pt-4 pr-12 text-left">
+        <DialogTitle>{continuous ? 'Scan items' : 'Scan barcode'}</DialogTitle>
+        <DialogDescription className="text-xs">{continuous ? 'Each scan adds one. Move a label out of view and back to scan it again.' : 'Scan the label to fill the barcode field.'}</DialogDescription>
       </DialogHeader>
-      <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-black">
+      <div className="min-h-0 space-y-3 overflow-y-auto overscroll-contain px-4 py-2">
+      <div className="relative h-[clamp(108px,27dvh,245px)] overflow-hidden rounded-xl bg-black">
         <video ref={setVideo} className="h-full w-full object-contain" playsInline muted />
         {state === 'RUNNING'
           ? <div aria-hidden="true" className="pointer-events-none absolute inset-0 grid place-items-center">
@@ -150,12 +185,51 @@ export default function BarcodeScannerModal({ open, onClose, onScan, onManualEnt
             {state === 'STARTING' ? 'Starting camera…' : error}
           </div>}
       </div>
-      {lastAccepted && <div role="status" className="rounded-xl border px-3 py-2 text-sm">
-        <div className="flex items-center gap-2 break-all font-mono"><ScanLine size={16} className="shrink-0" /> {lastAccepted}</div>
-        {feedback &&
-          <p className={`mt-1 ${feedback.kind === 'ok' ? 'text-emerald-600' : 'text-amber-700 dark:text-amber-300'}`}>{feedback.text}</p>}
+      {lastScan && <div className="rounded-lg border px-3 py-2 text-sm">
+        <div role="status" className="flex items-start gap-2">
+          {lastScan.outcome === 'added' ? <Check size={16} className="mt-0.5 shrink-0 text-emerald-600" /> : <ScanLine size={16} className="mt-0.5 shrink-0" />}
+          <p className={`min-w-0 break-words ${lastScan.outcome === 'added' && feedback?.kind !== 'warn' ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+            {feedback?.text || lastScan.code}
+          </p>
+        </div>
+        {lastScan.outcome === 'unlinked' && linking && !linkCode && <button type="button" className="mt-2 rounded-lg border px-3 py-2 text-xs font-semibold" onClick={() => {
+          scanPaused.current = true;
+          setLinkCode(lastScan.code);
+        }}>Link to an item</button>}
+        {linkCode && <div className="mt-2 space-y-2">
+          {linkItems.length ? <select aria-label="Item without a barcode" value={productId} onChange={event => setProductId(event.target.value)} className="w-full rounded-lg border bg-background p-2 text-sm">
+            <option value="">Select an item without a barcode</option>
+            {linkItems.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select> : <p className="text-xs text-muted-foreground">Add a new item under Items or Stock In to use this barcode.</p>}
+          {linkError && <p role="alert" className="text-xs text-red-600">{linkError}</p>}
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={cancelLink} className="rounded-lg border px-3 py-2 text-xs">Keep scanning</button>
+            {linkItems.length > 0 && <button type="button" disabled={!productId} className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50" onClick={() => {
+              const problem = linking?.link(linkCode, productId);
+              if (problem) { setLinkError(problem); return; }
+              setLastScan({ code: linkCode, outcome: 'added' });
+              cancelLink();
+            }}>Link &amp; add 1</button>}
+          </div>
+        </div>}
       </div>}
+      {draft && <section aria-label={draft.title} className="rounded-xl border">
+        <div className="flex items-center justify-between border-b px-3 py-2">
+          <h3 className="text-sm font-semibold">{draft.title}</h3>
+          <span className="text-xs tabular-nums text-muted-foreground">{units} {units === 1 ? 'unit' : 'units'}</span>
+        </div>
+        {orderedLines.length ? <ul className="max-h-36 divide-y overflow-y-auto">
+          {orderedLines.map(line => <li key={line.id} className={`flex items-center gap-2 px-3 py-2 text-sm ${line.id === highlighted?.id ? 'bg-emerald-500/10' : ''}`}>
+            <span className="min-w-0 flex-1 break-words font-medium">{line.name}</span>
+            <span className="shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs font-semibold tabular-nums" aria-label={`Quantity ${line.quantity}`}>× {line.quantity}</span>
+            {line.amount !== undefined && <span className="shrink-0 tabular-nums">{currency.format(line.amount)}</span>}
+          </li>)}
+        </ul> : <p className="px-3 py-3 text-xs text-muted-foreground">Scan an item to start.</p>}
+      </section>}
       <div className="flex flex-wrap gap-2">
+        <button type="button" aria-pressed={soundOn} onClick={onToggleSound} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-medium">
+          {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />} Sound {soundOn ? 'on' : 'off'}
+        </button>
         {devices.length > 1 && <select aria-label="Camera" value={deviceId} onChange={event => setDeviceId(event.target.value)} className="min-w-0 max-w-full rounded-lg border bg-background p-2 text-sm">
           <option value="">Automatic camera</option>
           {devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}
@@ -168,6 +242,17 @@ export default function BarcodeScannerModal({ open, onClose, onScan, onManualEnt
           <Keyboard size={16} /> Enter barcode
         </button>
       </div>
+      </div>
+      {continuous && <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t bg-background px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+        {draft && <div className="min-w-0">
+          <p className="text-xs text-muted-foreground">{draft.totalLabel || 'Bill total'}</p>
+          <p className="text-base font-bold tabular-nums">{currency.format(draft.total)}</p>
+        </div>}
+        <div className="ml-auto flex gap-2">
+          <button type="button" onClick={onClose} className={`min-h-11 rounded-lg px-4 text-sm font-bold ${onFinalize ? 'border' : 'bg-primary text-primary-foreground'}`}>Done</button>
+          {onFinalize && <button type="button" disabled={!orderedLines.length || !!linkCode} onClick={onFinalize.run} className="min-h-11 rounded-lg bg-primary px-4 text-sm font-bold text-primary-foreground disabled:opacity-50">{onFinalize.label}</button>}
+        </div>
+      </div>}
     </DialogContent>
   </Dialog>;
 }

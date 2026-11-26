@@ -13,13 +13,14 @@ export function isScannerBurst(input: BarcodeBurst) {
   return input.characters >= 4 && input.characters === input.value.length;
 }
 
-export function createCameraScanGate(rearmMs = 850) {
-  let lastCode = '';
-  let lastSeenAt = 0;
+export function createCameraScanGate(rearmMs = 450) {
+  const lastSeen = new Map<string, number>();
   return (code: string, now: number) => {
-    const seenRecently = lastCode === code && now - lastSeenAt < rearmMs;
-    lastCode = code;
-    lastSeenAt = now;
+    for (const [seen, time] of lastSeen) {
+      if (now - time >= rearmMs) lastSeen.delete(seen);
+    }
+    const seenRecently = lastSeen.has(code);
+    lastSeen.set(code, now);
     return !seenRecently;
   };
 }

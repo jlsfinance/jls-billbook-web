@@ -540,11 +540,13 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
                     const clash = StorageService.isBarcodeTaken(code, originalId || undefined);
                     if (clash) {
                       setFormMsg({ kind: 'err', text: `Ye barcode pehle se ${clash.name} ke saath linked hai.` });
-                      return;
+                      return 'rejected';
                     }
                     setDraft(d => ({ ...d, barcode: code }));
                     setFormMsg({ kind: 'ok', text: 'Barcode set ho gaya. Save karke link kar dein.' });
+                    return 'added';
                   }}
+                  cameraFeedback={formMsg}
                   lastScanMessage={draft.barcode ? `Barcode: ${draft.barcode}` : undefined}
                   hint="Scan ke baad barcode neeche field me aa jayega."
                 />

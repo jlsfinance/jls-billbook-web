@@ -69,7 +69,7 @@ const emptyNewProduct = (barcode: string): NewProductDraft => ({
 const StockIn: React.FC<StockInProps> = ({ onBack }) => {
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [lastScan, setLastScan] = useState('');
-  const [statusMsg, setStatusMsg] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string } | null>(null);
+  const [statusMsg, setStatusMsg] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string; itemId?: string } | null>(null);
   const [notFound, setNotFound] = useState<string | null>(null);
   const [archivedHit, setArchivedHit] = useState<Product | null>(null);
   const [newProduct, setNewProduct] = useState<NewProductDraft | null>(null);
@@ -95,7 +95,7 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
       }
       return [...prev, line];
     });
-    setStatusMsg({ kind: 'ok', text: message });
+    setStatusMsg({ kind: 'ok', text: message, itemId: line.productId });
     HapticService.light?.();
   };
 
@@ -119,18 +119,18 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
 
     if (!result.valid) {
       setStatusMsg({ kind: 'err', text: 'Barcode format/value valid nahi hai.' });
-      return;
+      return 'rejected' as const;
     }
     if (result.archived) {
       const p = lookupBarcode(products, barcode, { includeArchived: true }).product;
       setArchivedHit(p);
       setStatusMsg({ kind: 'warn', text: 'Ye product archived hai. Restore karke use karein.' });
-      return;
+      return 'rejected' as const;
     }
     if (!result.found || !result.product) {
       setNotFound(barcode);
-      setStatusMsg({ kind: 'warn', text: 'Ye barcode kisi product se linked nahi hai.' });
-      return;
+      setStatusMsg({ kind: 'warn', text: 'Barcode linked nahi hai. Done dabakar naya product bana sakte hain.' });
+      return 'unlinked' as const;
     }
 
     const p = result.product;
@@ -144,9 +144,10 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
         currentStock: Number(p.stock || 0),
         unit: p.unit || 'pcs',
       },
-      `${p.name} — 1 ${p.unit || 'pcs'} add hua. Stock: ${p.stock} → ${Number(p.stock || 0) + 1}`
+      `${p.name} · 1 ${p.unit || 'pcs'} added`
     );
     setLastScan(p.barcode || barcode);
+    return 'added' as const;
   };
 
   const updateLine = (productId: string, patch: Partial<DraftLine>) => {
@@ -228,7 +229,7 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
   };
 
   const finish = () => {
-    if (lines.length === 0) return;
+    if (lines.length === 0) return false;
     const entryId = crypto.randomUUID();
     const now = new Date().toISOString();
 
@@ -247,7 +248,7 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
 
     if (items.length === 0) {
       setStatusMsg({ kind: 'err', text: 'Har line me quantity 0 se zyada honi chahiye.' });
-      return;
+      return false;
     }
 
     const res = StorageService.saveStockEntry({
@@ -264,13 +265,14 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
 
     if (!res.ok || !res.entry) {
       setStatusMsg({ kind: 'err', text: res.error || 'Stock entry save nahi hui.' });
-      return;
+      return false;
     }
 
     HapticService.success?.();
     setSavedEntry(res.entry);
     setLines([]);
     setStatusMsg(null);
+    return true;
   };
 
   const restoreArchived = () => {
@@ -382,6 +384,13 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
             onScan={handleScan}
             continuous
             cameraFeedback={statusMsg}
+            scanDraft={{
+              title: 'Stock entry',
+              lines: lines.map(line => ({ id: line.productId, name: line.name, quantity: Number(line.quantity), amount: line.unitCost == null ? undefined : line.quantity * line.unitCost })),
+              total: totalValue,
+              totalLabel: 'Stock entry value',
+            }}
+            finalize={{ label: 'Save stock', run: finish }}
             hint="Ek hi session me jitne products chahiye scan karte jayein."
             lastScanMessage={lastScan ? `Last scan: ${lastScan}` : undefined}
           />
