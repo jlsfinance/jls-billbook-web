@@ -1,0 +1,151 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isCompanyMember(companyId) {
+      let comp = get(/databases/$(database)/documents/companies/$(companyId)).data;
+      return isSignedIn() && (
+        comp.owner_uid == request.auth.uid ||
+        (request.auth.token.email != null && comp.allowed_emails != null && request.auth.token.email in comp.allowed_emails)
+      );
+    }
+
+    function isAdminForCompany(companyId) {
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return isSignedIn() && userDoc.role == 'admin' && userDoc.companyId == companyId;
+    }
+
+    /* ================= COMPANIES & SHARED COMPANY DATA ================= */
+    match /companies/{companyId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.owner_uid == request.auth.uid;
+      allow update: if isSignedIn() && request.resource.data.owner_uid == resource.data.owner_uid && (
+        resource.data.owner_uid == request.auth.uid ||
+        (request.auth.token.email != null && resource.data.allowed_emails != null && request.auth.token.email in resource.data.allowed_emails) ||
+        isAdminForCompany(companyId)
+      );
+      allow delete: if isSignedIn() && resource.data.owner_uid == request.auth.uid;
+
+      function ownsCompany() {
+        return isSignedIn() && get(/databases/$(database)/documents/companies/$(companyId)).data.owner_uid == request.auth.uid;
+      }
+
+      function matchedAccountant(packet) {
+        return isSignedIn()
+          && request.auth.token.email_verified == true
+          && request.auth.token.email == packet.email
+          && packet.expiresAt > request.time;
+      }
+
+      match /accountant_packets/{packetId} {
+        allow get: if ownsCompany() || matchedAccountant(resource.data);
+        allow list, delete: if ownsCompany();
+        allow create: if ownsCompany()
+          && request.resource.data.keys().hasOnly(['email', 'company', 'from', 'to', 'expiresAt'])
+          && request.resource.data.email is string
+          && request.resource.data.email.size() > 2
+          && request.resource.data.email.size() <= 254
+          && request.resource.data.company is string
+          && request.resource.data.company.size() <= 200
+          && request.resource.data.from is string && request.resource.data.from.size() == 10
+          && request.resource.data.to is string && request.resource.data.to.size() == 10
+          && request.resource.data.expiresAt > request.time
+          && request.resource.data.expiresAt <= request.time + duration.value(8, 'd');
+      }
+
+      match /accountant_packet_files/{packetId} {
+        allow get: if ownsCompany()
+          || matchedAccountant(get(/databases/$(database)/documents/companies/$(companyId)/accountant_packets/$(packetId)).data);
+        allow delete: if ownsCompany();
+        allow create: if ownsCompany()
+          && request.resource.data.keys().hasOnly(['content'])
+          && request.resource.data.content is string
+          && request.resource.data.content.size() > 0
+          && request.resource.data.content.size() <= 500000;
+      }
+
+      match /{subcollection}/{docId} {
+        allow read, write: if subcollection != 'accountant_packets' && subcollection != 'accountant_packet_files' && isCompanyMember(companyId);
+      }
+    }
+
+    /* ================= USER-SCOPED BUSINESS & MULTI-COMPANY DATA ================= */
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+
+      match /{subPath=**} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
+
+    match /publicStorefronts/{companyId} {
+      function ownsStorefront() {
+        return isSignedIn() && get(/databases/$(database)/documents/companies/$(companyId)).data.owner_uid == request.auth.uid;
+      }
+
+      allow get: if resource != null || ownsStorefront();
+      allow create, update: if ownsStorefront()
+        && request.resource.data.keys().hasOnly(['name', 'tagline', 'phone', 'products'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.tagline is string
+        && request.resource.data.tagline.size() <= 180
+        && request.resource.data.phone is string
+        && request.resource.data.phone.matches('^[1-9][0-9]{9,14}$')
+        && request.resource.data.products is list
+        && request.resource.data.products.size() > 0
+        && request.resource.data.products.size() <= 500;
+      allow delete: if ownsStorefront();
+    }
+
+    /* ================= PUBLIC DIGITAL INVOICES / SHARED BILLS ================= */
+    match /publicBills/{billId} {
+      // Public read allowed for shared bill links; token verified in client & document schema
+      allow get: if resource.data.publicToken != null;
+      allow write: if isSignedIn();
+    }
+
+    /* ================= LEGACY CUSTOMER PORTAL COLLECTIONS ================= */
+    match /customers/{customerId} {
+      allow list: if isSignedIn() && (
+        resource.data.email == request.auth.token.email ||
+        isAdminForCompany(resource.data.companyId)
+      );
+      allow get: if isSignedIn() && (
+        resource.data.uid == request.auth.uid ||
+        resource.data.email == request.auth.token.email ||
+        isAdminForCompany(resource.data.companyId)
+      );
+      allow update: if isSignedIn() && (
+        resource.data.email == request.auth.token.email ||
+        isAdminForCompany(resource.data.companyId)
+      );
+      allow create, delete: if isAdminForCompany(request.resource.data.companyId);
+    }
+
+    match /records/{recordId} {
+      allow read: if isSignedIn() && (
+        get(/databases/$(database)/documents/customers/$(resource.data.customerId)).data.uid == request.auth.uid ||
+        isAdminForCompany(resource.data.companyId)
+      );
+      allow write: if isAdminForCompany(request.resource.data.companyId);
+    }
+
+    match /loans/{recordId} {
+      allow read: if isSignedIn() && (
+        get(/databases/$(database)/documents/customers/$(resource.data.customerId)).data.uid == request.auth.uid ||
+        isAdminForCompany(resource.data.companyId)
+      );
+      allow write: if isAdminForCompany(request.resource.data.companyId);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

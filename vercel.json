@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "client/dist",
+        "buildCommand": "npm install --legacy-peer-deps && npm run build"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/accountant/[^/]+/[^/]+/?$",
+      "dest": "/client/dist/index.html"
+    },
+    {
+      "src": "/store/[^/]+/?$",
+      "dest": "/client/dist/index.html"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "client/dist/$1"
+    }
+  ]
+}
