@@ -16,6 +16,7 @@ import InvoiceView from './InvoiceView';
 import { HapticService } from '@/services/hapticService';
 import { ContactsService } from '@/services/contactsService';
 import { formatDate } from '../utils/dateUtils';
+import { buildPartyLedger, inReportRange, localDay } from '../services/businessReports';
 import { WorkspaceFilters, WorkspaceHeading, WorkspaceMetrics, workspace, workspaceMoney } from './WorkspaceUI';
 
 interface CustomersProps {
@@ -130,13 +131,13 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
     setCustomers(StorageService.getCustomers());
     // Set default date range for statement (current month)
     const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+    const firstDay = localDay(new Date(now.getFullYear(), now.getMonth(), 1));
+    const lastDay = localDay(new Date(now.getFullYear(), now.getMonth() + 1, 0));
     setStartDate(firstDay);
     setEndDate(lastDay);
 
     // Set history date filter to show all by default (last 1 year)
-    const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()).toISOString().split('T')[0];
+    const oneYearAgo = localDay(new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()));
     setHistoryFromDate(oneYearAgo);
     setHistoryToDate(lastDay);
   }, []);
@@ -259,15 +260,24 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
     setSelectedCustomer(updatedSelected);
   };
 
+  const readStatement = (party: Customer, from: string, to: string) => {
+    if (!from || !to || from > to) {
+      showAlert('Check dates', 'Choose a start and end date in the correct order.', 'warning');
+      return null;
+    }
+    return buildPartyLedger(party, {
+      sales: StorageService.getInvoices(), purchases: StorageService.getPurchases(),
+      debitNotes: StorageService.getVouchersByType('DEBIT_NOTE'), payments: StorageService.getPayments(),
+    }, from, to);
+  };
+
   const handleDownloadStatement = async () => {
     if (!selectedCustomer) return;
 
     const company = StorageService.getCompanyProfile();
 
-    // Filter by date and Sort Ascending for Statement
-    const filteredTxs = transactions.filter(t =>
-      t.date >= startDate && t.date <= endDate
-    ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const ledger = readStatement(selectedCustomer, startDate, endDate);
+    if (!ledger) return;
 
     const doc = new jsPDF();
 
@@ -295,47 +305,35 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
     doc.setFont("helvetica", "normal");
     y += 10;
 
-    let totalDebit = 0;
-    let totalCredit = 0;
+    const formatBalance = (balance: number) => Math.abs(balance).toFixed(2) + (balance > 0 ? ' Dr.' : balance < 0 ? ' Cr.' : '');
+    doc.setFont('helvetica', 'bold');
+    doc.text(formatDate(startDate), 16, y);
+    doc.text('Opening Balance', 45, y);
+    doc.text(formatBalance(ledger.opening), ledger.opening < 0 ? 160 : 130, y, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    y += 8;
 
-    filteredTxs.forEach(tx => {
-      doc.text(formatDate(tx.date), 16, y);
-      doc.text(tx.type === 'INVOICE' ? `Inv: ${tx.reference}` : tx.type === 'CREDIT_NOTE' ? `Ret: ${tx.reference}` : `Pay: ${tx.reference}`, 45, y);
-
-      if (tx.type === 'INVOICE') {
-        doc.text(tx.amount.toFixed(2), 130, y, { align: "right" });
-        totalDebit += tx.amount;
-      } else {
-        doc.text("-", 130, y, { align: "right" });
-      }
-
-      if (tx.type === 'PAYMENT' || tx.type === 'CREDIT_NOTE') {
-        doc.text(tx.amount.toFixed(2), 160, y, { align: "right" });
-        totalCredit += tx.amount;
-      } else {
-        doc.text("-", 160, y, { align: "right" });
-      }
-
-      doc.text(tx.mode || '-', 190, y, { align: "right" });
-
+    for (const row of ledger.rows) {
+      if (y > 267) { doc.addPage(); y = 20; }
+      doc.text(formatDate(row.date.slice(0, 10)), 16, y);
+      doc.text(doc.splitTextToSize([row.kind, row.ref].filter(Boolean).join(' - '), 63)[0], 45, y);
+      doc.text(row.debit ? row.debit.toFixed(2) : '-', 130, y, { align: 'right' });
+      doc.text(row.credit ? row.credit.toFixed(2) : '-', 160, y, { align: 'right' });
+      doc.text(row.mode || '-', 190, y, { align: 'right' });
       y += 8;
-      if (y > 280) {
-        doc.addPage();
-        y = 20;
-      }
-    });
+    }
 
+    if (y > 254) { doc.addPage(); y = 20; }
     y += 5;
     doc.line(14, y, 196, y);
     y += 8;
-    doc.setFont("helvetica", "bold");
-    doc.text("Totals:", 100, y);
-    doc.text(totalDebit.toFixed(2), 130, y, { align: "right" });
-    doc.text(totalCredit.toFixed(2), 160, y, { align: "right" });
-
+    doc.setFont('helvetica', 'bold');
+    doc.text('Totals:', 100, y, { align: 'right' });
+    doc.text(ledger.debit.toFixed(2), 130, y, { align: 'right' });
+    doc.text(ledger.credit.toFixed(2), 160, y, { align: 'right' });
     y += 10;
-    doc.text("Current Outstanding Balance:", 130, y, { align: "right" });
-    doc.text(`Rs.${selectedCustomer.balance.toFixed(2)} `, 160, y, { align: "right" });
+    doc.text('Closing Balance', 100, y, { align: 'right' });
+    doc.text(formatBalance(ledger.closing), 160, y, { align: 'right' });
 
     // Unified Save/Share Logic
     const fileName = `Statement_${selectedCustomer.name.replace(/[^a-zA-Z0-9]/g, '_')}_${startDate}.pdf`;
@@ -368,10 +366,8 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
     const company = StorageService.getCompanyProfile();
     const todayDate = formatDate(new Date());
 
-    // Filter by history date range and Sort Ascending
-    const filteredTxs = transactions.filter(t =>
-      t.date >= historyFromDate && t.date <= historyToDate
-    ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const ledger = readStatement(selectedCustomer, historyFromDate, historyToDate);
+    if (!ledger) return;
 
     const doc = new jsPDF('p', 'mm', 'a4');
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -443,82 +439,33 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
 
     y += 5;
 
-    // Separate Debits and Credits
-    const debits = filteredTxs.filter(tx => tx.type === 'INVOICE');
-    const credits = filteredTxs.filter(tx => tx.type === 'PAYMENT' || tx.type === 'CREDIT_NOTE');
-
-    let debitTotal = 0;
-    let creditTotal = 0;
-
-    const maxRows = Math.max(debits.length, credits.length);
+    const debitRows = ledger.rows.filter(row => row.delta > 0 || (row.delta === 0 && row.direction > 0));
+    const creditRows = ledger.rows.filter(row => row.delta < 0 || (row.delta === 0 && row.direction < 0));
     const startY = y;
+    const drawEntry = (date: string, particulars: string, amount: number, credit: boolean, status = '') => {
+      const x = credit ? centerX : margin;
+      const width = credit || !status ? 50 : 37;
+      doc.text(date, x + 2, y);
+      doc.text(doc.splitTextToSize(particulars, width)[0], x + 18, y);
+      if (!credit && status) doc.text(status, margin + colWidth - 18, y);
+      doc.text(amount.toFixed(2), x + colWidth - 2, y, { align: 'right' });
+    };
 
-    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    const openingLabel = ledger.opening > 0 ? 'Opening Balance (Dr.)' : ledger.opening < 0 ? 'Opening Balance (Cr.)' : 'Opening Balance';
+    drawEntry(historyFromDate, openingLabel, Math.abs(ledger.opening), ledger.opening < 0);
+    y += 6;
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
 
-    for (let i = 0; i < maxRows; i++) {
-      if (y > pageHeight - 50) {
-        doc.addPage();
-        y = 20;
-      }
-
-      // DEBIT SIDE
-      if (i < debits.length) {
-        const deb = debits[i];
-        const isPaid = deb.status === 'PAID';
-
-        doc.setTextColor(0, 0, 0); // Always black for B&W compatibility
-
-        doc.text(deb.date, margin + 2, y);
-
-        // Truncate reference if too long
-        const ref = deb.reference.length > 12 ? deb.reference.slice(0, 10) + '..' : deb.reference;
-        doc.text(`Sale - #${ref}`, margin + 18, y);
-
-        // Status Column
-        doc.setFont("helvetica", isPaid ? "normal" : "bold");
-        doc.text(isPaid ? "PAID" : "DUE", margin + colWidth - 18, y);
-        doc.setFont("helvetica", "normal");
-
-        // Amount
-        const amountStr = deb.amount.toFixed(2);
-        const amountX = margin + colWidth - 2;
-        doc.text(amountStr, amountX, y, { align: 'right' });
-
-        // Strikethrough if PAID
-        if (isPaid) {
-          const textWidth = doc.getTextWidth(amountStr);
-          doc.setLineWidth(0.4);
-          doc.setDrawColor(50, 50, 50); // Dark grey line
-          // Adjust coordinates to strike through center of text
-          // amountX is right aligned, so start x is (amountX - textWidth)
-          doc.line(amountX - textWidth, y - 1, amountX, y - 1);
-          doc.setDrawColor(0, 0, 0); // Reset
-        }
-
-        // Only add to debitTotal if invoice is PENDING (not paid)
-        // WAIT: In double entry, we sum ALL debits usually. 
-        // But this specific logic seems to exclude paid invoices from total?
-        // Checking original logic: "Only add to debitTotal if invoice is PENDING"
-        // Yes, existing logic excludes paid invoices from total calculation?
-        // Let's verify line 456 of original file.
-        // Yes: "if (!isPaid) { debitTotal += deb.amount; }"
-        // Keeping logic identical to preserve balance calculation.
-        if (!isPaid) {
-          debitTotal += deb.amount;
-        }
-      }
-
-      // CREDIT SIDE
-      if (i < credits.length) {
-        const cred = credits[i];
-        const credLabel = cred.type === 'CREDIT_NOTE' ? `Ret - ${cred.reference}` : `Pay - ${cred.mode}`;
-        doc.text(cred.date, centerX + 2, y);
-        doc.text(credLabel, centerX + 18, y);
-        doc.text(cred.amount.toFixed(2), pageWidth - margin - 2, y, { align: 'right' });
-        creditTotal += cred.amount;
-      }
-
+    for (let i = 0; i < Math.max(debitRows.length, creditRows.length); i++) {
+      if (y > pageHeight - 50) { doc.addPage(); y = 20; }
+      const debit = debitRows[i];
+      const credit = creditRows[i];
+      if (debit) drawEntry(debit.date.slice(0, 10), [debit.kind, debit.ref].filter(Boolean).join(' - '), debit.debit, false,
+        debit.status === 'PAID' ? 'PAID' : debit.status === 'PARTIAL' ? 'PART' : debit.status ? 'DUE' : '');
+      if (credit) drawEntry(credit.date.slice(0, 10), [credit.kind, credit.ref].filter(Boolean).join(' - '), credit.credit, true);
       y += 5;
     }
 
@@ -538,22 +485,22 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
 
-    // Calculate actual closing balance from transactions
-    const closingBalance = debitTotal - creditTotal;
+    const closingBalance = ledger.closing;
 
     // Debit Total
-    doc.text(debitTotal.toFixed(2), margin + colWidth - 2, y, { align: 'right' });
+    doc.text('Total Dr.', margin + 2, y);
+    doc.text(ledger.debit.toFixed(2), margin + colWidth - 2, y, { align: 'right' });
 
     // Credit Total
     doc.text("Total Cr.", centerX + 2, y);
-    doc.text(creditTotal.toFixed(2), pageWidth - margin - 2, y, { align: 'right' });
+    doc.text(ledger.credit.toFixed(2), pageWidth - margin - 2, y, { align: 'right' });
 
     y += 8;
 
     // Closing Balance Row
     if (closingBalance >= 0) {
       // Dr. Balance - show on credit side to balance the ledger
-      doc.text("Closing Balance (Dr.)", centerX + 2, y);
+      doc.text(closingBalance ? "Closing Balance (Dr.)" : "Closing Balance", centerX + 2, y);
       doc.text(closingBalance.toFixed(2), pageWidth - margin - 5, y, { align: 'right' });
     } else {
       // Cr. Balance - show on debit side to balance the ledger
@@ -569,9 +516,9 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
 
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
-    const balanceMsg = closingBalance >= 0
+    const balanceMsg = closingBalance > 0
       ? `Aapka Balance baaki hai Rs ${closingBalance.toFixed(2)} (Dr.)`
-      : `Aap humein dene hain Rs ${Math.abs(closingBalance).toFixed(2)} (Cr.)`;
+      : closingBalance < 0 ? `Amount payable to party Rs ${Math.abs(closingBalance).toFixed(2)} (Cr.)` : 'No balance outstanding';
     doc.text(balanceMsg, pageWidth / 2, y, { align: 'center' });
 
     y += 15;
@@ -637,7 +584,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
   if (selectedCustomer) {
     // Filter transactions by history date range
     const filteredHistoryTransactions = transactions.filter(tx =>
-      tx.date >= historyFromDate && tx.date <= historyToDate
+      inReportRange(tx.date, historyFromDate, historyToDate)
     );
 
     return (
@@ -822,7 +769,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
                       return <li key={tx.id} className="flex flex-wrap items-center gap-2 px-3 py-3 sm:px-4">
                         <div className="min-w-0 flex-1">
                           <p className="break-words text-sm font-semibold">{label} · {tx.reference}</p>
-                          <p className="text-xs text-muted-foreground">{formatDate(tx.date)}{tx.mode ? ' · ' + tx.mode.replace(/_/g, ' ') : ''}</p>
+                          <p className="text-xs text-muted-foreground">{formatDate(tx.date.slice(0, 10))}{tx.mode ? ' · ' + tx.mode.replace(/_/g, ' ') : ''}</p>
                         </div>
                         <div className="shrink-0 text-right">
                           <p className="font-semibold tabular-nums">{workspaceMoney(tx.amount)}</p>
@@ -856,6 +803,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
                       <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-2">From Date</label>
                       <input
                         type="date"
+                        aria-label="Statement from date"
                         value={startDate}
                         onChange={(e) => setStartDate(e.target.value)}
                         className="w-full p-4 bg-surface-container-high border-2 border-transparent focus:border-google-blue/30 rounded-[24px] text-sm font-bold text-foreground focus:ring-4 focus:ring-google-blue/5 outline-none transition-all"
@@ -865,6 +813,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWo
                       <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] px-2">To Date</label>
                       <input
                         type="date"
+                        aria-label="Statement to date"
                         value={endDate}
                         onChange={(e) => setEndDate(e.target.value)}
                         className="w-full p-4 bg-surface-container-high border-2 border-transparent focus:border-google-blue/30 rounded-[24px] text-sm font-bold text-foreground focus:ring-4 focus:ring-google-blue/5 outline-none transition-all"

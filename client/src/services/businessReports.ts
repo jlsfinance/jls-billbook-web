@@ -135,6 +135,61 @@ function groupItemSales(sales: Invoice[], mode: string, itemId?: string) {
   );
 }
 
+const paymentLabel = (p: Payment) => {
+  const direction = p.type === 'PAID' ? 'Payment Out' : 'Payment In';
+  return p.mode === 'CHEQUE' && p.chequeStatus && p.chequeStatus !== 'CLEARED'
+    ? `${direction} (cheque ${p.chequeStatus.toLowerCase()})` : direction;
+};
+
+export function buildPartyLedger(party: Customer, source: Pick<ReportSource, 'sales' | 'purchases' | 'debitNotes' | 'payments'>, from: string, to: string) {
+  const vouchers = [...source.sales, ...source.purchases.map(voucher => voucher.type ? voucher : { ...voucher, type: 'PURCHASE' as const }), ...source.debitNotes];
+  const paymentRows = source.payments.filter(payment => payment.customerId === party.id && !payment.isDeleted);
+  const allocated = new Map<string, number>();
+  for (const payment of paymentRows) {
+    for (const allocation of getPaymentAllocations(payment)) {
+      const key = (payment.type === 'PAID' ? 'purchase:' : 'sale:') + allocation.invoiceId;
+      allocated.set(key, (allocated.get(key) || 0) + Math.max(0, amount(allocation.amount)));
+    }
+  }
+
+  const entries = [
+    ...vouchers.filter(voucher => voucher.customerId === party.id && !voucher.isDeleted &&
+      voucher.conversionStatus !== 'CANCELLED' && (!voucher.type || ['SALE', 'PURCHASE', 'CREDIT_NOTE', 'DEBIT_NOTE'].includes(voucher.type)))
+      .map(voucher => {
+        const purchase = voucher.type === 'PURCHASE' || voucher.type === 'DEBIT_NOTE';
+        const isReturn = fiscal(voucher) < 0;
+        const direction = (purchase ? -1 : 1) * fiscal(voucher);
+        const linked = allocated.get((purchase ? 'purchase:' : 'sale:') + voucher.id) || 0;
+        // Add back separate allocations here, then post each receipt/payment on its own date below.
+        const value = isReturn
+          ? (voucher.status === 'PAID' ? 0 : Math.abs(amount(voucher.total)))
+          : Math.min(Math.abs(amount(voucher.total)), due(voucher) + linked);
+        return {
+          date: voucher.date, kind: purchase ? isReturn ? 'Purchase Return' : 'Purchase' : isReturn ? 'Sales Return' : 'Sale',
+          ref: voucher.invoiceNumber, mode: voucher.paymentMode || '', status: voucher.status || '',
+          direction, delta: round(direction * value),
+        };
+      }),
+    ...paymentRows.map(payment => {
+      const direction = payment.type === 'PAID' ? 1 : -1;
+      return { date: payment.date, kind: paymentLabel(payment), ref: payment.reference || payment.invoiceNumber || '',
+        mode: payment.mode, status: '', direction, delta: round(direction * amount(payment.amount)) };
+    }),
+  ].filter(entry => Boolean(day(entry.date))).sort((a, b) => a.date.localeCompare(b.date));
+
+  // Legacy parties may have a running balance without a separate starting balance.
+  const initial = party.openingBalance != null
+    ? amount(party.openingBalance)
+    : round(amount(party.balance) - total(entries, entry => entry.delta));
+  const opening = round(initial + total(entries.filter(entry => day(entry.date) < from), entry => entry.delta));
+  const rows = entries.filter(entry => inReportRange(entry.date, from, to)).map(entry => ({
+    ...entry, debit: Math.max(0, entry.delta), credit: Math.max(0, -entry.delta),
+  }));
+  const debit = round(Math.max(0, opening) + total(rows, entry => entry.debit));
+  const credit = round(Math.max(0, -opening) + total(rows, entry => entry.credit));
+  return { opening, rows, debit, credit, closing: round(debit - credit) };
+}
+
 export function buildBusinessReport(id: string, source: ReportSource, filters: ReportFilters, today = localDay()): ReportData {
   const matchesDate = (date: string) => inReportRange(date, filters.from, filters.to);
   const matchesParty = (party: string) => !filters.party || party === filters.party;
@@ -162,11 +217,6 @@ export function buildBusinessReport(id: string, source: ReportSource, filters: R
   const productById = new Map(source.products.map(product => [product.id, product]));
   const products = source.products.filter(product => !product.isArchived && (!filters.item || product.id === filters.item));
   const payments = source.payments.filter(p => !p.isDeleted);
-  const paymentLabel = (p: Payment) => {
-    const direction = p.type === 'PAID' ? 'Payment Out' : 'Payment In';
-    return p.mode === 'CHEQUE' && p.chequeStatus && p.chequeStatus !== 'CLEARED'
-      ? `${direction} (cheque ${p.chequeStatus.toLowerCase()})` : direction;
-  };
   const expenses = source.expenses.filter(e => !e.isDeleted && matchesDate(e.date) && matchesStaff(e));
   const staffName = new Map(source.staff.map(member => [member.id, member.name]));
   const creatorName = (entry: { createdBy?: string }) => entry.createdBy
@@ -294,28 +344,15 @@ export function buildBusinessReport(id: string, source: ReportSource, filters: R
       const party = parties.find(p => p.id === filters.party);
       const headers = ['Date', 'Type', 'Reference', 'Dr', 'Cr', 'Running Balance'];
       if (!party) return report(headers, [], undefined, 'Select a party to view its statement.');
-      const saleIds = new Set(sales.map(v => v.id));
-      const linkedPayments = new Map<string, number>();
-      const ledgerPayments = payments.filter(p => p.customerId === party.id);
-      for (const payment of ledgerPayments) {
-        for (const allocation of getPaymentAllocations(payment)) {
-          linkedPayments.set(allocation.invoiceId, (linkedPayments.get(allocation.invoiceId) || 0) + amount(allocation.amount));
-        }
-      }
-      const entries = [
-        ...active.filter(v => v.customerId === party.id).map(v => ({
-          date: v.date, kind: saleIds.has(v.id) ? fiscal(v) > 0 ? 'Sale' : 'Sales Return' : fiscal(v) > 0 ? 'Purchase' : 'Purchase Return',
-          ref: v.invoiceNumber, delta: (saleIds.has(v.id) ? 1 : -1) * fiscal(v) * (fiscal(v) < 0 ? (v.status === 'PAID' ? 0 : amount(v.total)) : (due(v) + (linkedPayments.get(v.id) || 0))),
-        })),
-        ...ledgerPayments.map(p => ({ date: p.date, kind: paymentLabel(p), ref: p.reference || p.invoiceNumber || '', delta: (p.type === 'PAID' ? 1 : -1) * amount(p.amount) })),
-      ].sort((a, b) => a.date.localeCompare(b.date));
-      let running = amount(party.openingBalance) + total(entries.filter(e => day(e.date) < filters.from), e => e.delta);
-      const opening = round(running);
-      const lines = entries.filter(e => matchesDate(e.date)).map(e => {
-        running += e.delta;
-        return [formatDate(e.date), e.kind, e.ref, Math.max(0, round(e.delta)), Math.max(0, round(-e.delta)), round(running)];
+      const ledger = buildPartyLedger(party, { sales, purchases, debitNotes, payments }, filters.from, filters.to);
+      let running = ledger.opening;
+      const lines = ledger.rows.map(entry => {
+        running = round(running + entry.delta);
+        return [formatDate(day(entry.date)), entry.kind, entry.ref, entry.debit, entry.credit, running];
       });
-      return report(headers, [[formatDate(filters.from), 'Opening Balance', '', '', '', opening], ...lines], [money('Opening Balance', opening), money('Closing Balance', running)], 'Positive balances are receivable. Cash paid directly on a bill is reflected in its outstanding amount.');
+      return report(headers, [[formatDate(filters.from), 'Opening Balance', '', '', '', ledger.opening], ...lines],
+        [money('Opening Balance', ledger.opening), money('Closing Balance', ledger.closing)],
+        'Positive balances are receivable. Cash paid directly on a bill is reflected in its outstanding amount.');
     }
     case 'party_aging': {
       const rows = parties.filter(p => amount(p.balance) > 0).map(party => {
