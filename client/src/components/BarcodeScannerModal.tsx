@@ -1,14 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import type { IScannerControls } from '@zxing/browser';
-import { AlertTriangle, Check, Keyboard, RefreshCw, ScanLine, Volume2, VolumeX, Zap, ZapOff } from 'lucide-react';
+import { AlertTriangle, Check, Keyboard, Minus, Plus, RefreshCw, ScanLine, Volume2, VolumeX, Zap, ZapOff } from 'lucide-react';
 import { createCameraScanGate } from '../services/barcodeInput';
 import { normalizeScannedBarcode } from '../services/barcodeService';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 
 export type ScanOutcome = 'added' | 'unlinked' | 'rejected';
+export type ScanQuantityDelta = -1 | 1;
 export type ScanDraft = {
   title: string;
-  lines: { id: string; productId?: string; name: string; quantity: number; amount?: number }[];
+  lines: {
+    id: string;
+    productId?: string;
+    name: string;
+    quantity: number;
+    amount?: number;
+    changeQuantity: (delta: ScanQuantityDelta) => void;
+  }[];
   total: number;
   totalLabel?: string;
 };
@@ -216,13 +224,25 @@ export default function BarcodeScannerModal({
       {draft && <section aria-label={draft.title} className="rounded-xl border">
         <div className="flex items-center justify-between border-b px-3 py-2">
           <h3 className="text-sm font-semibold">{draft.title}</h3>
-          <span className="text-xs tabular-nums text-muted-foreground">{units} {units === 1 ? 'unit' : 'units'}</span>
+          <span aria-live="polite" className="text-xs tabular-nums text-muted-foreground">{units} {units === 1 ? 'unit' : 'units'}</span>
         </div>
         {orderedLines.length ? <ul className="max-h-36 divide-y overflow-y-auto">
-          {orderedLines.map(line => <li key={line.id} className={`flex items-center gap-2 px-3 py-2 text-sm ${line.id === highlighted?.id ? 'bg-emerald-500/10' : ''}`}>
-            <span className="min-w-0 flex-1 break-words font-medium">{line.name}</span>
-            <span className="shrink-0 rounded-md bg-muted px-2 py-0.5 text-xs font-semibold tabular-nums" aria-label={`Quantity ${line.quantity}`}>× {line.quantity}</span>
-            {line.amount !== undefined && <span className="shrink-0 tabular-nums">{currency.format(line.amount)}</span>}
+          {orderedLines.map(line => <li key={line.id} className={`flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 text-sm ${line.id === highlighted?.id ? 'bg-emerald-500/10' : ''}`}>
+            <span className="min-w-[8ch] flex-1 break-words font-medium">{line.name}</span>
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <div role="group" aria-label={`Quantity controls for ${line.name}`} className="flex shrink-0 items-center rounded-lg border bg-background">
+                <button type="button" aria-label={`Decrease quantity of ${line.name}`} onClick={() => line.changeQuantity(-1)}
+                  className="grid h-11 w-10 place-items-center rounded-l-lg text-muted-foreground hover:bg-muted hover:text-foreground active:bg-muted focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-primary">
+                  <Minus size={16} aria-hidden="true" />
+                </button>
+                <span className="min-w-7 px-0.5 text-center text-xs font-semibold tabular-nums" aria-label={`Quantity ${line.quantity}`}>{line.quantity}</span>
+                <button type="button" aria-label={`Increase quantity of ${line.name}`} onClick={() => line.changeQuantity(1)}
+                  className="grid h-11 w-10 place-items-center rounded-r-lg text-muted-foreground hover:bg-muted hover:text-foreground active:bg-muted focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-primary">
+                  <Plus size={16} aria-hidden="true" />
+                </button>
+              </div>
+              {line.amount !== undefined && <span className="shrink-0 whitespace-nowrap text-xs tabular-nums sm:text-sm">{currency.format(line.amount)}</span>}
+            </div>
           </li>)}
         </ul> : <p className="px-3 py-3 text-xs text-muted-foreground">Scan an item to start.</p>}
       </section>}

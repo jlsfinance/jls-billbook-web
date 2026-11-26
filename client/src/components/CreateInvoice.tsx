@@ -520,6 +520,23 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
   const [lastScannedId, setLastScannedId] = useState<string | null>(null);
   const billItems = items.filter(item => item.productId && Number(item.quantity) > 0);
 
+  const changeScannedQuantity = (index: number, productId: string, delta: -1 | 1) => {
+    setHasChanges(true);
+    setLastScannedId(last => last === productId ? null : last);
+    const customer = customers.find(party => party.id === selectedCustomerId);
+    setItems(prev => {
+      const item = prev[index];
+      if (!item || item.productId !== productId) return prev;
+      const quantity = Number(item.quantity) + delta;
+      if (quantity <= 0) return prev.filter((_, row) => row !== index);
+      const updated = { ...item, quantity };
+      calculateTaxes(updated, company, customer, gstEnabled);
+      const next = [...prev];
+      next[index] = updated;
+      return next;
+    });
+  };
+
   /**
    * Adds a product to the bill. Scanning the same barcode again increments the
    * existing line instead of creating a duplicate row.
@@ -1283,13 +1300,14 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
               cameraFeedback={scanMsg}
               scanDraft={{
                 title: 'Current bill',
-                lines: billItems.map((item, index) => ({
+                lines: items.flatMap((item, index) => item.productId && Number(item.quantity) > 0 ? [{
                   id: `${item.productId}:${index}`,
                   productId: item.productId,
                   name: item.description,
                   quantity: Number(item.quantity),
                   amount: item.totalAmount ?? item.baseAmount,
-                })),
+                  changeQuantity: delta => changeScannedQuantity(index, item.productId, delta),
+                }] : []),
                 total: calculateRoundedTotal(),
               }}
               finalize={customers.some(customer => customer.id === selectedCustomerId) ? {

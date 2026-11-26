@@ -222,7 +222,10 @@ export const POSBilling: React.FC<POSBillingProps> = ({ onBack }) => {
               cameraFeedback={scanFeedback}
               scanDraft={{
                 title: 'Current bill',
-                lines: cart.map(item => ({ id: item.productId, name: item.description, quantity: item.quantity, amount: item.totalAmount ?? item.baseAmount })),
+                lines: cart.map(item => ({
+                  id: item.productId, name: item.description, quantity: item.quantity, amount: item.totalAmount ?? item.baseAmount,
+                  changeQuantity: delta => updateQty(item.productId, delta),
+                })),
                 total: totals.total,
                 totalLabel: `Bill total · ${paymentMode === 'ONLINE' ? 'UPI / card' : paymentMode === 'CREDIT' ? 'Credit' : 'Cash'}`,
               }}
