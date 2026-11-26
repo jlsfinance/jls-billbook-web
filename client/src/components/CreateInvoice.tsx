@@ -517,6 +517,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
   // ---------------------------------------------------------------
   const [scanMsg, setScanMsg] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string; itemId?: string } | null>(null);
   const [lastScannedId, setLastScannedId] = useState<string | null>(null);
+  const billItems = items.filter(item => item.productId && Number(item.quantity) > 0);
 
   /**
    * Adds a product to the bill. Scanning the same barcode again increments the
@@ -1307,7 +1308,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
               cameraFeedback={scanMsg}
               scanDraft={{
                 title: 'Current bill',
-                lines: items.filter(item => item.productId && Number(item.quantity) > 0).map((item, index) => ({
+                lines: billItems.map((item, index) => ({
                   id: `${item.productId}:${index}`,
                   productId: item.productId,
                   name: item.description,
@@ -1337,7 +1338,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
             )}
             <div className="mt-2 flex items-center justify-between">
               <p className="text-[10px] font-bold text-muted-foreground">
-                {items.filter(i => i.productId).length} items · {items.reduce((a, i) => a + (Number(i.quantity) || 0), 0)} qty
+                {billItems.length} {billItems.length === 1 ? 'item' : 'items'} · {billItems.reduce((sum, item) => sum + Number(item.quantity), 0)} qty
               </p>
               {lastScannedId && (
                 <button
@@ -1672,7 +1673,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
             </span>
           </div>
           <div className="text-xs font-bold text-slate-400">
-            {items.length} Items Added
+            {billItems.length} {billItems.length === 1 ? 'Item' : 'Items'} Added
           </div>
         </div>
       </motion.div>
