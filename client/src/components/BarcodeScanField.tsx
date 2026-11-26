@@ -135,7 +135,10 @@ export default function BarcodeScanField({
 
   useEffect(() => {
     if (!autoFocus || disabled) return;
-    const timer = window.setTimeout(() => inputRef.current?.focus(), 120);
+    const session = cameraSession.current;
+    const timer = window.setTimeout(() => {
+      if (cameraSession.current === session) inputRef.current?.focus({ preventScroll: true });
+    }, 120);
     return () => window.clearTimeout(timer);
   }, [autoFocus, disabled]);
 
