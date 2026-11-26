@@ -47,14 +47,46 @@ import { HapticService } from '@/services/hapticService';
 import { CompanyForm } from '@/components/CompanyForm';
 import Auth from '@/components/Auth';
 import { PermissionErrorModal } from '@/components/PermissionErrorModal';
-import { showErrorAlert } from '@/utils/errorCodes';
 import { WhatsAppNumberModal } from '@/components/WhatsAppNumberModal';
 import { SearchProvider } from '@/contexts/SearchContext';
 import GlobalSearch from '@/components/GlobalSearch';
 
+const STARTUP_WAIT_MS = 12_000;
+
+function StartupScreen({ phase, failed = false }: { phase: string; failed?: boolean }) {
+    const [takingLonger, setTakingLonger] = useState(false);
+
+    useEffect(() => {
+        if (failed) return;
+        const timeout = window.setTimeout(() => setTakingLonger(true), STARTUP_WAIT_MS);
+        return () => window.clearTimeout(timeout);
+    }, [failed]);
+
+    const canRetry = failed || takingLonger;
+    return (
+        <div className="flex min-h-[100dvh] w-full flex-col items-center justify-center gap-6 bg-white px-6 text-center dark:bg-slate-950">
+            <div className="relative">
+                <div className="flex h-20 w-20 rotate-12 items-center justify-center rounded-3xl bg-blue-600 shadow-2xl shadow-blue-500/20">
+                    <SidebarIcon className="h-10 w-10 -rotate-12 text-white" />
+                </div>
+                <div className="absolute -bottom-2 -right-2 flex h-8 w-8 items-center justify-center rounded-full border-4 border-white bg-emerald-500 dark:border-slate-950">
+                    <div className={`h-2 w-2 rounded-full bg-white ${canRetry ? '' : 'motion-safe:animate-ping'}`} />
+                </div>
+            </div>
+            <div className="max-w-sm space-y-2">
+                <h1 className="text-2xl font-black uppercase italic tracking-tighter text-slate-900 dark:text-white">JLS Suite</h1>
+                <p role="status" className="text-sm text-slate-600 dark:text-slate-300">
+                    {failed ? `Could not load ${phase}.` : takingLonger ? `Loading ${phase} is taking longer than expected.` : `Loading ${phase}…`}
+                </p>
+            </div>
+            {canRetry && <button type="button" onClick={() => window.location.reload()} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white">Retry</button>}
+        </div>
+    );
+}
+
 const AccountingApp: React.FC = () => {
     const { user, loading: authLoading } = useAuth();
-    const { company, loading: companyLoading, permissionError } = useCompany();
+    const { company, loading: companyLoading, loadFailed: companyLoadFailed, permissionError } = useCompany();
     const { theme, setTheme } = useTheme();
 
     const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
@@ -68,6 +100,7 @@ const AccountingApp: React.FC = () => {
     const dataCompanyId = user ? company?.id ?? '' : '';
     const dataScope = JSON.stringify([dataUserId, dataCompanyId]);
     const [loadedScope, setLoadedScope] = useState<string | null>(null);
+    const [failedScope, setFailedScope] = useState<string | null>(null);
     const isInitializing = loadedScope !== dataScope;
     const [isCloudConnected, setIsCloudConnected] = useState(false);
     const [showImport, setShowImport] = useState(false);
@@ -85,7 +118,7 @@ const AccountingApp: React.FC = () => {
     const [activeVoucherType, setActiveVoucherType] = useState<VoucherType>('SALE');
 
     useEffect(() => {
-        if (authLoading || (user && companyLoading)) return;
+        if (authLoading || (user && (companyLoading || companyLoadFailed || permissionError))) return;
         let cancelled = false;
         const initApp = async () => {
             try {
@@ -115,15 +148,16 @@ const AccountingApp: React.FC = () => {
                         setCurrentView(ViewState.CUSTOMER_LEDGER);
                     }
                 }
+                setLoadedScope(dataScope);
             } catch (error) {
-                if (!cancelled) showErrorAlert('DATA_LOAD_FAILED', error);
-            } finally {
-                if (!cancelled) setLoadedScope(dataScope);
+                if (cancelled) return;
+                console.error('Could not load billing records:', error);
+                setFailedScope(dataScope);
             }
         };
         initApp();
         return () => { cancelled = true; };
-    }, [authLoading, user, companyLoading, dataUserId, dataCompanyId, dataScope]);
+    }, [authLoading, user, companyLoading, companyLoadFailed, permissionError, dataUserId, dataCompanyId, dataScope]);
 
 
     useEffect(() => {
@@ -243,29 +277,12 @@ const AccountingApp: React.FC = () => {
     };
 
 
-    // Auth & Loading States
-    if (authLoading || (user && companyLoading) || isInitializing) {
-        return (
-            <div className="flex h-screen w-full items-center justify-center bg-white dark:bg-slate-950 flex-col gap-6 animate-pulse">
-                <div className="relative">
-                    <div className="w-20 h-20 rounded-3xl bg-blue-600 flex items-center justify-center shadow-2xl shadow-blue-500/20 rotate-12">
-                        <SidebarIcon className="w-10 h-10 text-white -rotate-12" />
-                    </div>
-                    <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-emerald-500 border-4 border-white dark:border-slate-950 flex items-center justify-center">
-                        <div className="w-2 h-2 rounded-full bg-white animate-ping" />
-                    </div>
-                </div>
-                <div className="text-center">
-                    <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tighter uppercase italic">JLS Suite</h1>
-                    <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mt-1">Initializing Secure Session</p>
-                </div>
-            </div>
-        );
-    }
-
+    if (authLoading) return <StartupScreen key="session" phase="your session" />;
+    if (user && (companyLoading || companyLoadFailed)) return <StartupScreen key="companies" phase="your companies" failed={companyLoadFailed} />;
     if (permissionError) {
         return <PermissionErrorModal />;
     }
+    if (isInitializing) return <StartupScreen key={dataScope} phase="your billing records" failed={failedScope === dataScope} />;
 
     if (!user && currentView !== ViewState.PUBLIC_VIEW_INVOICE) {
         return <Auth />;

@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
+  browserPopupRedirectResolver,
   User,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -44,9 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    console.log("Setting up auth state listener...");
     const unsubscribe = onAuthStateChanged(auth, (user) => {
-      console.log("Auth state changed. User:", user ? `${user.email}` : "null");
       setUser(user);
       setLoading(false);
     });
@@ -54,7 +54,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Initialize Native Google Auth
     const initNativeGoogle = async () => {
       try {
-        const { Capacitor } = await import('@capacitor/core');
         if (Capacitor.isNativePlatform()) {
           const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
           await GoogleAuth.initialize();
@@ -75,7 +74,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async () => {
     try {
-      const { Capacitor } = await import('@capacitor/core');
       const isNative = Capacitor.isNativePlatform();
       console.log("Platform:", isNative ? "Native" : "Web");
 
@@ -125,7 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Web platform - use popup
         console.log("Using web popup for Google Sign-In...");
         const provider = new GoogleAuthProvider();
-        await signInWithPopup(auth, provider);
+        await signInWithPopup(auth, provider, browserPopupRedirectResolver);
         console.log("Web Google Sign-In successful!");
       }
     } catch (error: any) {

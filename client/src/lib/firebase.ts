@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { browserLocalPersistence, browserSessionPersistence, indexedDBLocalPersistence, initializeAuth } from "firebase/auth";
+import type { FirebaseApp } from "firebase/app";
 import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
 
 // Assuming FirebaseConfig type is defined elsewhere or needs to be added.
@@ -37,7 +38,14 @@ const accountingApp = getApps().length > 0 && getApps().find(a => a.name === 'ac
   ? getApp('accounting-app')
   : initializeApp(firebaseConfigAccounting, 'accounting-app');
 
-export const auth = getAuth(accountingApp);
+// Initialize the Google popup resolver only when the user requests Google sign-in.
+function initializeBrowserAuth(app: FirebaseApp) {
+  return initializeAuth(app, {
+    persistence: [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence],
+  });
+}
+
+export const auth = initializeBrowserAuth(accountingApp);
 export const db = getFirestore(accountingApp);
 
 // Application 2: Records (Ledger Module - JLS Suite)
@@ -45,7 +53,7 @@ const recordsApp = getApps().length > 0 && getApps().find(a => a.name === 'recor
   ? getApp('records-app')
   : initializeApp(firebaseConfigRecords, 'records-app');
 
-export const recordsAuth = getAuth(recordsApp);
+export const recordsAuth = initializeBrowserAuth(recordsApp);
 export const recordsDb = getFirestore(recordsApp);
 
 // Enable offline persistence for Accounting DB (Default)

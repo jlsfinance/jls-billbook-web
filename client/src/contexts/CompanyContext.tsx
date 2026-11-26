@@ -38,6 +38,7 @@ interface CompanyContextType {
   company: CompanyData | null;
   companies: CompanyData[];
   loading: boolean;
+  loadFailed: boolean;
   permissionError: boolean;
   saveCompany: (data: Partial<CompanyData>) => Promise<void>;
   createCompany: (data: Partial<CompanyData>) => Promise<string>;
@@ -53,14 +54,19 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
   const [company, setCompany] = useState<CompanyData | null>(null);
   const [companies, setCompanies] = useState<CompanyData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [resolvedUserId, setResolvedUserId] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [permissionError, setPermissionError] = useState(false);
   const requestSequence = useRef(0);
 
   const fetchCompanies = async () => {
     const request = ++requestSequence.current;
+    setLoadFailed(false);
+    setPermissionError(false);
     if (!user) {
       setCompanies([]);
       setCompany(null);
+      setResolvedUserId(null);
       setLoading(false);
       return;
     }
@@ -81,14 +87,13 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
       } as CompanyData;
       setCompanies([demoCompany]);
       setCompany(demoCompany);
+      setResolvedUserId(user.uid);
       setLoading(false);
       return;
     }
 
     setLoading(true);
     try {
-      setPermissionError(false);
-
       // Fetch companies owned by this user
       const qOwned = query(collection(db, 'companies'), where('owner_uid', '==', user.uid));
       const qAllowed = user.email
@@ -142,11 +147,16 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
       console.error('Error fetching companies:', error);
       if (error.code === 'permission-denied') {
         setPermissionError(true);
+      } else {
+        setLoadFailed(true);
       }
       setCompanies([]);
       setCompany(null);
     } finally {
-      if (request === requestSequence.current) setLoading(false);
+      if (request === requestSequence.current) {
+        setResolvedUserId(user.uid);
+        setLoading(false);
+      }
     }
   };
 
@@ -238,7 +248,8 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
     <CompanyContext.Provider value={{
       company,
       companies,
-      loading,
+      loading: loading || resolvedUserId !== (user?.uid ?? null),
+      loadFailed,
       permissionError,
       saveCompany,
       createCompany,
