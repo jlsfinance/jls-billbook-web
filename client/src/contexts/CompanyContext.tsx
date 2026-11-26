@@ -1,12 +1,14 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { collection, doc, getDocs, setDoc, serverTimestamp, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { InvoicePrefixConfig } from '../types';
 import { useAuth, DEMO_UID } from './AuthContext';
 import { StorageService } from '../services/storageService';
+import { EXISTING_BOOKS_ID, hasBookRecords, loadExistingProfile, pickBookWorkspace } from '../services/existingBooks';
 
 interface CompanyData {
   id: string;
+  isLegacy?: boolean;
   name: string;
   address: string;
   state?: string;
@@ -44,6 +46,7 @@ interface CompanyContextType {
 }
 
 const CompanyContext = createContext<CompanyContextType | undefined>(undefined);
+const preferredCompanyKey = (userId: string) => `billbook_preferred_company:${userId}`;
 
 export function CompanyProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -51,8 +54,10 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
   const [companies, setCompanies] = useState<CompanyData[]>([]);
   const [loading, setLoading] = useState(true);
   const [permissionError, setPermissionError] = useState(false);
+  const requestSequence = useRef(0);
 
   const fetchCompanies = async () => {
+    const request = ++requestSequence.current;
     if (!user) {
       setCompanies([]);
       setCompany(null);
@@ -86,47 +91,54 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
 
       // Fetch companies owned by this user
       const qOwned = query(collection(db, 'companies'), where('owner_uid', '==', user.uid));
-      const snapshotOwned = await getDocs(qOwned);
-
-      // Fetch companies where user is an allowed user
-      const qAllowed = query(collection(db, 'companies'), where('allowed_emails', 'array-contains', user.email));
-      const snapshotAllowed = await getDocs(qAllowed);
+      const qAllowed = user.email
+        ? getDocs(query(collection(db, 'companies'), where('allowed_emails', 'array-contains', user.email)))
+        : Promise.resolve(null);
+      const [snapshotOwned, snapshotAllowed, hasExisting] = await Promise.all([
+        getDocs(qOwned), qAllowed, hasBookRecords(user.uid),
+      ]);
 
       const fetchedCompanies: CompanyData[] = [];
       snapshotOwned.forEach((doc) => {
         fetchedCompanies.push({ id: doc.id, ...doc.data() } as CompanyData);
       });
 
-      snapshotAllowed.forEach((doc) => {
+      snapshotAllowed?.forEach((doc) => {
         // Avoid duplicates if user is owner and also in allowed list
         if (!fetchedCompanies.find(c => c.id === doc.id)) {
           fetchedCompanies.push({ id: doc.id, ...doc.data() } as CompanyData);
         }
       });
 
-      setCompanies(fetchedCompanies);
-
-      // Get current active company from localStorage
-      const activeCompanyId = localStorage.getItem('active_company_id');
-
-      if (activeCompanyId) {
-        const activeCompany = fetchedCompanies.find(c => c.id === activeCompanyId);
-        if (activeCompany) {
-          setCompany(activeCompany);
-        } else if (fetchedCompanies.length > 0) {
-          // If stored company not found, use first one
-          setCompany(fetchedCompanies[0]);
-          localStorage.setItem('active_company_id', fetchedCompanies[0].id);
-        }
-      } else if (fetchedCompanies.length > 0) {
-        // No active company set, use first one
-        setCompany(fetchedCompanies[0]);
-        localStorage.setItem('active_company_id', fetchedCompanies[0].id);
-      } else {
-        setCompany(null);
+      if (hasExisting) {
+        const profile = await loadExistingProfile(user.uid).catch(() => undefined);
+        fetchedCompanies.push({
+          ...profile,
+          id: EXISTING_BOOKS_ID,
+          isLegacy: true,
+          name: profile?.name || 'Existing books',
+          address: profile?.address || '',
+          gst: profile?.gst || profile?.gstin || '',
+          gst_enabled: profile?.gst_enabled ?? true,
+          owner_uid: user.uid,
+          owner_email: user.email || '',
+          created_at: null,
+          updated_at: null,
+        });
       }
-
+      const selected = await pickBookWorkspace(
+        fetchedCompanies,
+        localStorage.getItem(preferredCompanyKey(user.uid)),
+        localStorage.getItem('active_company_id'),
+        companyId => hasBookRecords(user.uid, companyId),
+      );
+      if (request !== requestSequence.current) return;
+      setCompanies(fetchedCompanies);
+      setCompany(selected);
+      if (selected) localStorage.setItem('active_company_id', selected.id);
+      else localStorage.removeItem('active_company_id');
     } catch (error: any) {
+      if (request !== requestSequence.current) return;
       console.error('Error fetching companies:', error);
       if (error.code === 'permission-denied') {
         setPermissionError(true);
@@ -134,21 +146,25 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
       setCompanies([]);
       setCompany(null);
     } finally {
-      setLoading(false);
+      if (request === requestSequence.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchCompanies();
+    return () => { requestSequence.current++; };
   }, [user]);
 
   const saveCompany = async (data: Partial<CompanyData>) => {
     if (!user || !company) return;
 
-    if (user.uid === DEMO_UID) {
+    if (user.uid === DEMO_UID || company.isLegacy) {
       const cur = StorageService.getCompanyProfile();
-      StorageService.saveCompanyProfile({ ...cur, ...(data as any) });
-      setCompany({ ...company, ...data } as CompanyData);
+      const profile = { ...cur, ...data } as typeof cur;
+      StorageService.saveCompanyProfile(profile);
+      const updated = { ...company, ...data, id: company.id, isLegacy: company.isLegacy };
+      setCompany(updated);
+      setCompanies(items => items.map(item => item.id === company.id ? updated : item));
       return;
     }
 
@@ -193,10 +209,10 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
         updated_at: serverTimestamp()
       });
 
-      await fetchCompanies();
-
       // Auto-switch to new company
       localStorage.setItem('active_company_id', newCompanyRef.id);
+      localStorage.setItem(preferredCompanyKey(user.uid), newCompanyRef.id);
+      await fetchCompanies();
 
       return newCompanyRef.id;
     } catch (error: any) {
@@ -213,6 +229,7 @@ export function CompanyProvider({ children }: { children: React.ReactNode }) {
     if (selectedCompany) {
       setCompany(selectedCompany);
       localStorage.setItem('active_company_id', companyId);
+      if (user) localStorage.setItem(preferredCompanyKey(user.uid), companyId);
       window.location.reload(); // Reload to refresh all data
     }
   };

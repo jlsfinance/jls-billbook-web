@@ -67,7 +67,7 @@ export const CompanySwitcher: React.FC = () => {
                                         <Building2 className="w-4 h-4 text-white" />
                                     </div>
                                     <div className="flex-1 text-left min-w-0">
-                                        <p className="text-sm font-bold text-slate-800 dark:text-white truncate">{comp.name}</p>
+                                        <p className="text-sm font-bold text-slate-800 dark:text-white truncate">{comp.name}{comp.isLegacy && comp.name !== 'Existing books' ? ' · Existing books' : ''}</p>
                                         {comp.gst && <p className="text-xs text-slate-500 truncate">GST: {comp.gst}</p>}
                                     </div>
                                     {comp.id === company.id && (

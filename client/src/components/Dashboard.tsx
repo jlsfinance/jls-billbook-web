@@ -63,8 +63,8 @@ const Dashboard: React.FC<DashboardProps> = ({
     const [showBackupSettings, setShowBackupSettings] = useState(false);
 
     useEffect(() => {
-        StorageService.runDueAutomatedBills();
-    }, []);
+        if (!company?.isLegacy) StorageService.runDueAutomatedBills();
+    }, [company?.isLegacy]);
 
     useEffect(() => {
         loadData();
@@ -216,7 +216,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                                                     className={`w-full flex items-center gap-3 p-4 rounded-2xl transition-all ${comp.id === company?.id ? 'bg-google-blue text-white' : 'hover:bg-surface-container-highest text-on-surface'}`}
                                                 >
                                                     <Building2 className="w-4 h-4" />
-                                                    <span className="flex-1 text-left font-bold text-xs truncate">{comp.name}</span>
+                                                    <span className="flex-1 text-left font-bold text-xs truncate">{comp.name}{comp.isLegacy && comp.name !== 'Existing books' ? ' · Existing books' : ''}</span>
                                                     {comp.id === company?.id && <Check className="w-3 h-3" />}
                                                 </button>
                                             ))}

@@ -14,7 +14,7 @@ export const OnlineStoreManager: React.FC<OnlineStoreManagerProps> = ({ onBack }
   const { user, isDemo } = useAuth();
   const { company } = useCompany();
   const companyId = company?.id;
-  const canPublish = Boolean(companyId && user && company?.owner_uid === user.uid && !isDemo);
+  const canPublish = Boolean(companyId && user && company?.owner_uid === user.uid && !isDemo && !company.isLegacy);
   const initialCompany = StorageService.getCompanyProfile();
   const [storeName, setStoreName] = useState(initialCompany.onlineStore?.storeName || initialCompany.name);
   const [tagline, setTagline] = useState(initialCompany.onlineStore?.tagline || 'Order directly via WhatsApp');

@@ -461,7 +461,7 @@ const Settings: React.FC = () => {
         </div>
 
         {/* User Access Section */}
-        <div>
+        {!company?.isLegacy && <div>
           <h2 className="px-4 mb-2 text-xs font-black text-slate-400 uppercase tracking-wider">Access Management</h2>
           <div className="bg-white dark:bg-slate-800 rounded-3xl overflow-hidden shadow-sm">
             <SettingsItem
@@ -495,7 +495,7 @@ const Settings: React.FC = () => {
               </div>
             )}
           </div>
-        </div>
+        </div>}
 
         {/* Danger Zone */}
         <div>

@@ -84,6 +84,6 @@ function PacketManager({ company, companyId, from, to, workbook }: Props & { com
 export default function AccountantPacketManager(props: Props) {
   const { user, isDemo } = useAuth();
   const { company } = useCompany();
-  if (!company || !user || isDemo || company.owner_uid !== user.uid) return null;
+  if (!company || !user || isDemo || company.isLegacy || company.owner_uid !== user.uid) return null;
   return <PacketManager key={company.id} company={company.name} companyId={company.id} {...props} />;
 }
