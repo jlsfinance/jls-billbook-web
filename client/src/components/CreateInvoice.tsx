@@ -518,7 +518,8 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
   // ---------------------------------------------------------------
   const [scanMsg, setScanMsg] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string; itemId?: string } | null>(null);
   const [lastScannedId, setLastScannedId] = useState<string | null>(null);
-  const billItems = items.filter(item => item.productId && Number(item.quantity) > 0);
+  const selectedItems = items.filter(item => item.productId && item.productId.trim());
+  const billItems = selectedItems.filter(item => Number(item.quantity) > 0);
 
   const changeScannedQuantity = (index: number, productId: string, delta: -1 | 1) => {
     setHasChanges(true);
@@ -911,10 +912,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
   };
 
   // Calculations
-  const calculateSubtotal = () => items.reduce((sum, item) => sum + (item.baseAmount || 0), 0);
-  const calculateTotalCGST = () => items.reduce((sum, item) => sum + (item.cgstAmount || 0), 0);
-  const calculateTotalSGST = () => items.reduce((sum, item) => sum + (item.sgstAmount || 0), 0);
-  const calculateTotalIGST = () => items.reduce((sum, item) => sum + (item.igstAmount || 0), 0);
+  const calculateSubtotal = () => selectedItems.reduce((sum, item) => sum + (item.baseAmount || 0), 0);
+  const calculateTotalCGST = () => selectedItems.reduce((sum, item) => sum + (item.cgstAmount || 0), 0);
+  const calculateTotalSGST = () => selectedItems.reduce((sum, item) => sum + (item.sgstAmount || 0), 0);
+  const calculateTotalIGST = () => selectedItems.reduce((sum, item) => sum + (item.igstAmount || 0), 0);
 
   const calculateTotal = () => {
     const subtotal = calculateSubtotal();
@@ -1043,12 +1044,9 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
 
     const customer = customers.find(c => c.id === selectedCustomerId);
     if (!customer) return alert('Select a customer');
-    // Filter out items with no product selected (ghost rows)
-    const validItems = items.filter(i => i.productId && i.productId.trim() !== '');
+    if (selectedItems.length === 0) return alert('Add at least one item');
 
-    if (validItems.length === 0) return alert('Add at least one item');
-
-    const cleanedItems: InvoiceItem[] = validItems.map(item => ({
+    const cleanedItems: InvoiceItem[] = selectedItems.map(item => ({
       ...item,
       quantity: Number(item.quantity) || 1,
       rate: Number(item.rate) || 0,
@@ -1127,7 +1125,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
   };
 
   return (
-    <div className="min-h-screen bg-surface-container-low pb-32 font-sans">
+    <div className="min-h-screen bg-surface-container-low pb-28 font-sans">
       {/* Edit Warning Modal */}
       {showEditWarning && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] p-4">
@@ -1145,11 +1143,11 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
         </div>
       )}
 
-      <header className="sticky top-0 z-30 border-b border-border bg-surface">
-        <div className="mx-auto flex min-h-16 max-w-5xl items-center gap-3 px-4">
+      <header className="sticky top-0 z-30 border-b border-border bg-surface/95 backdrop-blur">
+        <div className="mx-auto flex min-h-14 max-w-5xl items-center gap-2.5 px-3 sm:px-4">
           <button type="button" aria-label="Back" onClick={onCancel} className={workspace.secondary + ' w-11 shrink-0 !px-0'}><ArrowLeft size={19} /></button>
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-bold text-foreground tracking-tight truncate">
+            <h1 className="truncate text-lg font-bold tracking-tight text-foreground">
               {({
                 QUOTATION: initialInvoice ? 'Edit Quotation' : 'New Quotation',
                 PROFORMA: initialInvoice ? 'Edit Proforma Invoice' : 'New Proforma Invoice',
@@ -1158,28 +1156,30 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
                 DEBIT_NOTE: initialInvoice ? 'Edit Debit Note' : 'New Debit Note',
                 CREDIT_NOTE: initialInvoice ? 'Edit Return' : 'New Return (CN)',
                 PURCHASE: initialInvoice ? 'Edit Purchase' : 'New Purchase',
-                SALE: initialInvoice ? 'Edit Invoice' : 'New Invoice',
+                SALE: initialInvoice ? 'Edit Invoice' : 'Create Invoice',
               }[effectiveType] || 'New Invoice')}
             </h1>
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-none">
+            <p className="text-xs text-muted-foreground">
               {getInvoiceNumberPreview()}
             </p>
           </div>
         </div>
       </header>
 
-      <div className="max-w-5xl mx-auto space-y-3 pt-3 px-3">
-        {/* Customer Section - Compact */}
-        <div className={workspace.panel + ' p-4'}>
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-8 h-8 rounded-xl bg-google-blue/10 flex items-center justify-center text-google-blue">
+      <div className="mx-auto grid max-w-5xl items-start gap-3 px-3 pt-3 sm:px-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-3">
+
+        <section aria-labelledby="invoice-party" className={workspace.panel + ' p-3'}>
+          <div className="mb-2 flex items-center gap-1.5">
+            <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary">
               <UserPlus className="w-4 h-4" />
             </div>
-            <h2 className="text-sm font-bold text-foreground">Bill To</h2>
+            <h2 id="invoice-party" className="text-sm font-semibold">Bill to</h2>
           </div>
           <div className="relative group">
             <Autocomplete
-              options={customers.map(c => ({ id: c.id, label: c.company, subLabel: c.name }))}
+              options={customers.map(c => ({ id: c.id, label: c.company || c.name, subLabel: c.company && c.name !== c.company ? c.name : undefined }))}
+              compact
               value={selectedCustomerId}
               onChange={(val) => {
                 setSelectedCustomerId(val);
@@ -1215,85 +1215,52 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
           )}
           <div className="grid grid-cols-2 gap-2 mt-3">
             <div>
-              <label className="text-[9px] font-bold text-muted-foreground uppercase px-1 mb-0.5 block">Date</label>
+              <label htmlFor="invoice-date" className="mb-1 block text-xs text-muted-foreground">Bill date</label>
               <div className="relative bg-surface-container-high rounded-xl overflow-hidden border border-border">
-                <input type="date" value={date} onChange={(e) => { setDate(e.target.value); setHasChanges(true); }} className="w-full bg-transparent p-2 text-xs font-bold text-foreground outline-none" />
+                <input id="invoice-date" type="date" value={date} onChange={(e) => { setDate(e.target.value); setHasChanges(true); }} className="min-h-10 w-full min-w-0 bg-transparent px-2 text-sm text-foreground outline-none" />
               </div>
             </div>
             <div>
-              <label className="text-[9px] font-bold text-muted-foreground uppercase px-1 mb-0.5 block">Due Date</label>
+              <label htmlFor="invoice-due" className="mb-1 block text-xs text-muted-foreground">Due date</label>
               <div className="relative bg-surface-container-high rounded-xl overflow-hidden border border-border">
-                <input type="date" value={dueDate} onChange={(e) => { setDueDate(e.target.value); setHasChanges(true); }} className="w-full bg-transparent p-2 text-xs font-bold text-foreground outline-none" />
+                <input id="invoice-due" type="date" value={dueDate} onChange={(e) => { setDueDate(e.target.value); setHasChanges(true); }} className="min-h-10 w-full min-w-0 bg-transparent px-2 text-sm text-foreground outline-none" />
               </div>
             </div>
           </div>
 
-          {/* Previous Balance Toggle */}
           {selectedCustomerId && previousBalance > 0 && !isCreditNote && (
-            <div className="mt-4 p-4 rounded-3xl bg-amber-50 dark:bg-amber-900/10 border-2 border-amber-100 dark:border-amber-900/30 flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-amber-600 shadow-sm border border-amber-200/50 dark:border-amber-800/30">
-                  <Banknote className="w-6 h-6" />
-                </div>
-                <div>
-                  <p className="text-[10px] font-black text-amber-600/70 uppercase tracking-[0.2em] mb-0.5">PURANA BAKI (Prev. Bal)</p>
-                  <p className="text-xl font-black text-slate-800 dark:text-amber-50 tracking-tight">₹{previousBalance.toLocaleString('en-IN')}</p>
-                </div>
-              </div>
-              <motion.button
-                whileTap={{ scale: 0.9 }}
-                onClick={() => {
-                  setIncludePreviousBalance(!includePreviousBalance);
-                  HapticService.impact();
-                }}
-                type="button"
-                className={`h-11 px-6 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all shadow-md active:shadow-sm ${includePreviousBalance
-                  ? 'bg-amber-500 text-white border-b-4 border-amber-700'
-                  : 'bg-white dark:bg-slate-800 text-slate-400 border-2 border-slate-100 dark:border-slate-700'
-                  }`}
-              >
-                {includePreviousBalance ? 'ADDED ✓' : 'ADD TO BILL'}
-              </motion.button>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-2.5 py-2">
+              <span className="text-xs font-medium text-foreground">Previous balance <strong className="ml-1 tabular-nums">{workspaceMoney(previousBalance)}</strong></span>
+              <button type="button" aria-pressed={includePreviousBalance} onClick={() => {
+                setIncludePreviousBalance(!includePreviousBalance);
+                setHasChanges(true);
+                HapticService.impact();
+              }} className={workspace.secondary + ' !min-h-8 !px-2.5 !text-xs'}>
+                {includePreviousBalance ? 'Added to bill' : 'Add to bill'}
+              </button>
             </div>
           )}
-        </div>
+        </section>
 
-        {/* payment Mode - Compact */}
-        <div className="bg-surface-container p-1 rounded-full border border-border flex items-center">
-          <button
-            onClick={() => { setPaymentMode('CREDIT'); setHasChanges(true); }}
-            className={`flex-1 py-2 px-4 rounded-full flex items-center justify-center gap-1 transition-all text-xs ${paymentMode === 'CREDIT'
-              ? 'bg-google-red text-white font-bold'
-              : 'text-muted-foreground font-bold hover:bg-surface-container-high'
-              }`}
-          >
-            <CreditCard className="w-4 h-4" /> <span>Credit</span>
-          </button>
-          <button
-            onClick={() => { setPaymentMode('CASH'); setHasChanges(true); }}
-            className={`flex-1 py-2 px-4 rounded-full flex items-center justify-center gap-1 transition-all text-xs ${paymentMode === 'CASH'
-              ? 'bg-google-green text-white font-bold'
-              : 'text-muted-foreground font-bold hover:bg-surface-container-high'
-              }`}
-          >
-            <Banknote className="w-4 h-4" /> <span>Cash</span>
-          </button>
-        </div>
-
-        <div className="space-y-2 pt-2">
-          <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-3">
-              <h2 className="text-base font-semibold text-foreground">Items</h2>
-              <VoiceInput onItemsParsed={handleVoiceItems} />
+        <section aria-labelledby="invoice-items" className={workspace.panel + ' min-w-0 overflow-hidden'}>
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <h2 id="invoice-items" className="text-sm font-semibold">Items</h2>
+              <span className="text-xs text-muted-foreground">{billItems.length}</span>
             </div>
-            <button type="button" onClick={handleAddItemAndOpen} className={workspace.secondary}><Plus size={16} /> Add item</button>
+            <div className="flex items-center gap-2">
+              <VoiceInput compact onItemsParsed={handleVoiceItems} />
+              <button type="button" onClick={handleAddItemAndOpen} className={workspace.primary + ' !min-h-10'}><Plus size={16} /> Add item</button>
+            </div>
           </div>
 
           {/* Always-visible scan surface: hardware scanner + camera (PRD §14) */}
-          <div className="bg-surface-container rounded-2xl border border-border p-3">
+          <div className="border-y border-border bg-surface-container-low px-3 py-2.5">
             <BarcodeScanField
-              label="Scan barcode to add item"
-              placeholder="Barcode scan karein…"
+              label="Barcode"
+              placeholder="Enter barcode"
+              hint="USB or Bluetooth scanner: keep this field focused."
+              inputClassName="!py-2"
               onScan={handleBarcodeScan}
               continuous
               linkUnmatched
@@ -1330,7 +1297,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
               </div>
             )}
             <div className="mt-2 flex items-center justify-between">
-              <p className="text-[10px] font-bold text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 {billItems.length} {billItems.length === 1 ? 'item' : 'items'} · {billItems.reduce((sum, item) => sum + Number(item.quantity), 0)} qty
               </p>
               {lastScannedId && (
@@ -1344,7 +1311,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="divide-y divide-border">
             <AnimatePresence mode="popLayout">
               {items.filter(i => i.productId).map((item, idx) => (
                 <motion.div
@@ -1363,168 +1330,62 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
                       handleOpenItemModal(items.indexOf(item));
                     }
                   }}
-                  className="bg-surface-container p-3 rounded-xl border border-border flex gap-3 items-center active:scale-[0.98] transition-all cursor-pointer"
+                  className="flex cursor-pointer items-center gap-2 px-3 py-2.5 hover:bg-surface-container-low focus-visible:outline focus-visible:-outline-offset-2 focus-visible:outline-primary"
                 >
-                  <div className="w-10 h-10 rounded-full bg-google-blue/10 flex items-center justify-center text-google-blue shrink-0">
-                    <Package className="w-5 h-5" />
+                  <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                    <Package size={16} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-foreground truncate">{item.description}</p>
                     <div className="flex items-center gap-1 mt-0.5">
-                      <span className="px-2 py-0.5 rounded-full bg-surface-container-highest text-[9px] font-bold text-muted-foreground">{item.quantity}x</span>
-                      <span className="text-[10px] text-muted-foreground">@ ₹{item.rate}</span>
+                      <span className="text-xs text-muted-foreground">{item.quantity} × {workspaceMoney(item.rate)}</span>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-base font-bold text-foreground">₹{(item.totalAmount || 0).toLocaleString('en-IN')}</p>
+                    <p className="text-sm font-semibold tabular-nums">{workspaceMoney(item.totalAmount ?? item.baseAmount)}</p>
                   </div>
                 </motion.div>
               ))}
             </AnimatePresence>
           </div>
 
-          {!billItems.length && <p className="px-1 py-3 text-sm text-muted-foreground">Scan a barcode or choose Add item to start.</p>}
+          {!billItems.length && <p className="px-3 py-4 text-center text-sm text-muted-foreground">No items added yet</p>}
+        </section>
         </div>
 
-      </div>
-
-      {/* Item Zoom Modal */}
-      <AnimatePresence>
-        {showItemModal && activeItemIndex !== null && (
-          <div className="fixed inset-0 z-[100] flex flex-col justify-end">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowItemModal(false)}
-              className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ y: "100%", borderRadius: "40px 40px 0 0" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="relative bg-white dark:bg-slate-900 w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl pb-12"
-            >
-              <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full mx-auto mb-8" />
-
-              <div className="space-y-6">
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Item</label>
-                  <Autocomplete
-                    options={products.map(p => ({ id: p.id, label: p.name }))}
-                    value={items[activeItemIndex].productId}
-                    onChange={(val) => handleUpdateItem(activeItemIndex, 'productId', val)}
-                    onCreate={(query) => handleCreateProduct(query, activeItemIndex)}
-                    placeholder="Search or Create Product..."
-                    type="product"
-                    autoFocus
-                    onKeyDown={(e) => handleModalKeyDown(e, 'productId')}
-                    inputRef={(el) => { modalRefs.current['productId'] = el; }}
-                  />
-                  {items[activeItemIndex].productId && (
-                    <div className="flex justify-end mt-1">
-                      <button
-                        onClick={() => handleEditProduct(items[activeItemIndex].productId)}
-                        className="text-[10px] font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-lg flex items-center gap-1"
-                      >
-                        Edit Product Details
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border-2 border-slate-100 dark:border-slate-800">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Qty</label>
-                    <input
-                      type="number"
-                      className="w-full bg-transparent text-2xl font-black text-blue-600 outline-none"
-                      value={items[activeItemIndex].quantity || ''}
-                      onChange={(e) => handleUpdateItem(activeItemIndex, 'quantity', e.target.value)}
-                      placeholder="1"
-                      onKeyDown={(e) => handleModalKeyDown(e, 'quantity')}
-                      ref={(el) => { modalRefs.current['quantity'] = el; }}
-                    />
-                  </div>
-                  <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border-2 border-slate-100 dark:border-slate-800">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Rate</label>
-                    <input
-                      type="number"
-                      className="w-full bg-transparent text-2xl font-black text-slate-900 dark:text-slate-100 outline-none"
-                      value={items[activeItemIndex].rate || ''}
-                      onChange={(e) => handleUpdateItem(activeItemIndex, 'rate', e.target.value)}
-                      placeholder="0.00"
-                      onKeyDown={(e) => handleModalKeyDown(e, 'rate')}
-                      ref={(el) => { modalRefs.current['rate'] = el; }}
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    onClick={() => {
-                      setShowItemModal(false);
-                      setTimeout(handleAddItemAndOpen, 300);
-                    }}
-                    className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 py-5 rounded-[24px] font-black text-xs uppercase tracking-wider active:scale-95 transition-all border border-slate-200 dark:border-slate-700"
-                  >
-                    Save & Add Next
-                  </button>
-                  <button
-                    onClick={() => setShowItemModal(false)}
-                    className="flex-1 bg-blue-600 text-white py-5 rounded-[24px] font-black text-xs uppercase tracking-wider shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
-                  >
-                    Save & Done
-                  </button>
-                  <button
-                    onClick={() => {
-                      handleRemoveItem(activeItemIndex);
-                      setShowItemModal(false);
-                    }}
-                    className="w-16 bg-red-50 dark:bg-red-900/20 text-red-600 flex items-center justify-center rounded-[24px] active:scale-95 transition-all"
-                  >
-                    <Trash2 className="w-6 h-6" />
-                  </button>
-                </div>
-
-                <div className="bg-gradient-to-br from-blue-600 to-blue-700 p-8 rounded-[40px] text-white flex justify-between items-center shadow-2xl shadow-blue-500/40 relative overflow-hidden">
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl" />
-                  <div className="relative z-10">
-                    <p className="text-[11px] font-black uppercase opacity-70 tracking-widest mb-1">Item Total Amount</p>
-                    <p className="text-5xl font-black tracking-tighter drop-shadow-lg">₹{(items[activeItemIndex].totalAmount || 0).toFixed(2).toLocaleString()}</p>
-                  </div>
-                  <div className="text-right relative z-10">
-                    <div className="bg-white/20 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/20">
-                      <p className="text-[10px] font-black uppercase tracking-tight">Tax Included</p>
-                      <p className="text-sm font-black">GST {items[activeItemIndex].gstRate}%</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
+      <aside aria-label="Invoice payment and details" className="min-w-0 space-y-3">
+        <section aria-labelledby="invoice-payment" className={workspace.panel + ' p-3'}>
+          <h2 id="invoice-payment" className="mb-2 text-sm font-semibold">Payment mode</h2>
+          <div className="grid grid-cols-2 gap-1 rounded-xl bg-surface-container-low p-1">
+            {(['CREDIT', 'CASH'] as const).map(mode => {
+              const Icon = mode === 'CREDIT' ? CreditCard : Banknote;
+              return <button key={mode} type="button" aria-pressed={paymentMode === mode}
+                onClick={() => { setPaymentMode(mode); setHasChanges(true); }}
+                className={paymentMode === mode ? workspace.primary + ' !min-h-9' : workspace.secondary + ' !min-h-9 border-transparent'}>
+                <Icon size={16} /> {mode === 'CREDIT' ? 'Credit' : 'Cash'}
+              </button>;
+            })}
           </div>
-        )}
-      </AnimatePresence>
+        </section>
 
-      {/* More Bill Details (GST / E-Way / Charges / Account) */}
-      <div className="max-w-5xl mx-auto px-4 mt-4">
-        <div className="bg-white dark:bg-slate-800 rounded-[24px] shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
+      <div>
+        <div className={workspace.panel + ' overflow-hidden'}>
           <button
             type="button"
             onClick={() => setShowMoreDetails(!showMoreDetails)}
-            className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors"
+            aria-expanded={showMoreDetails}
+            className="flex min-h-11 w-full items-center justify-between px-3 py-2 text-left hover:bg-surface-container-low"
           >
-            <span className="text-xs font-black uppercase tracking-wider text-slate-600 dark:text-slate-300 flex items-center gap-2">
+            <span className="flex items-center gap-2 text-sm font-semibold">
               <Truck className="w-4 h-4 text-google-blue" />
-              More Bill Details (Place of Supply, E-Way Bill, Extra Charges, Account)
+              More bill details
             </span>
             <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showMoreDetails ? 'rotate-180' : ''}`} />
           </button>
 
           {showMoreDetails && (
-            <div className="p-6 pt-2 space-y-4 border-t border-slate-100 dark:border-slate-700">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="space-y-3 border-t border-border p-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Place of Supply (State)</label>
                   <input
@@ -1638,12 +1499,13 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
       </div>
 
       {/* Notes Section */}
-      <div className="max-w-5xl mx-auto px-4 pb-4 mt-6">
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-[24px] shadow-sm border border-slate-100 dark:border-slate-700">
-          <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Additional Notes</h2>
+      <div>
+        <div className={workspace.panel + ' p-3'}>
+          <label htmlFor="invoice-notes" className="mb-2 block text-sm font-semibold">Notes</label>
           <textarea
-            className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl p-4 text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-            rows={3}
+            id="invoice-notes"
+            className={workspace.input + ' resize-y'}
+            rows={2}
             value={notes}
             onChange={(e) => { setNotes(e.target.value); setHasChanges(true); }}
             placeholder="Terms & Conditions, Payment Instructions, etc."
@@ -1651,7 +1513,7 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
         </div>
       </div>
 
-      <section aria-label="Bill discount" className="mx-auto max-w-5xl px-3 pb-3">
+      <section aria-label="Bill discount" className="min-w-0">
         <div className={workspace.panel + ' grid grid-cols-[1fr_auto_auto] items-center gap-2 p-3'}>
           <label htmlFor="bill-discount" className="text-sm font-semibold">Bill discount</label>
           <select aria-label="Discount type" value={discountType} onChange={event => { setDiscountType(event.target.value as 'PERCENTAGE' | 'AMOUNT'); setHasChanges(true); }} className={workspace.input + ' w-auto'}>
@@ -1660,6 +1522,133 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
           <input id="bill-discount" type="number" min="0" value={discountValue} onChange={event => { setDiscountValue(Number(event.target.value)); setHasChanges(true); }} className={workspace.input + ' w-20'} />
         </div>
       </section>
+
+      </aside>
+      </div>
+
+      {/* Item Zoom Modal */}
+      <AnimatePresence>
+        {showItemModal && activeItemIndex !== null && (
+          <div className="fixed inset-0 z-[100] flex flex-col items-center justify-end sm:justify-center sm:p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowItemModal(false)}
+              className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ y: 40, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 40, opacity: 0 }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              role="dialog" aria-modal="true" aria-labelledby="item-editor-title"
+              className="relative max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-border bg-surface px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-2xl"
+            >
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 id="item-editor-title" className="text-base font-semibold">{items[activeItemIndex].productId ? 'Edit item' : 'Select an item'}</h2>
+                <button type="button" aria-label="Close item editor" onClick={() => setShowItemModal(false)} className={workspace.secondary + ' w-10 !min-h-10 !px-0'}><X size={18} /></button>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Item</label>
+                  <Autocomplete
+                    options={products.map(p => ({ id: p.id, label: p.name, subLabel: workspaceMoney(p.price) }))}
+                    compact
+                    value={items[activeItemIndex].productId}
+                    onChange={(val) => handleUpdateItem(activeItemIndex, 'productId', val)}
+                    onCreate={(query) => handleCreateProduct(query, activeItemIndex)}
+                    placeholder="Search or Create Product..."
+                    type="product"
+                    autoFocus={!items[activeItemIndex].productId}
+                    onKeyDown={(e) => handleModalKeyDown(e, 'productId')}
+                    inputRef={(el) => { modalRefs.current['productId'] = el; }}
+                  />
+                  {items[activeItemIndex].productId && (
+                    <div className="flex justify-end mt-1">
+                      <button
+                        onClick={() => handleEditProduct(items[activeItemIndex].productId)}
+                        className="text-[10px] font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-lg flex items-center gap-1"
+                      >
+                        Edit Product Details
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-border bg-surface-container-low p-2.5">
+                    <label className="mb-1 block text-xs font-medium text-muted-foreground">Quantity</label>
+                    <input
+                      type="number"
+                      aria-label="Quantity"
+                      disabled={!items[activeItemIndex].productId}
+                      className={workspace.input}
+                      value={items[activeItemIndex].quantity || ''}
+                      onChange={(e) => handleUpdateItem(activeItemIndex, 'quantity', e.target.value)}
+                      placeholder="1"
+                      onKeyDown={(e) => handleModalKeyDown(e, 'quantity')}
+                      ref={(el) => { modalRefs.current['quantity'] = el; }}
+                    />
+                  </div>
+                  <div className="rounded-xl border border-border bg-surface-container-low p-2.5">
+                    <label className="mb-1 block text-xs font-medium text-muted-foreground">Rate</label>
+                    <input
+                      type="number"
+                      aria-label="Rate"
+                      disabled={!items[activeItemIndex].productId}
+                      className={workspace.input}
+                      value={items[activeItemIndex].rate || ''}
+                      onChange={(e) => handleUpdateItem(activeItemIndex, 'rate', e.target.value)}
+                      placeholder="0.00"
+                      onKeyDown={(e) => handleModalKeyDown(e, 'rate')}
+                      ref={(el) => { modalRefs.current['rate'] = el; }}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border px-3 py-2">
+                  <span className="text-sm text-muted-foreground">Item total {gstEnabled && Number(items[activeItemIndex].gstRate) > 0 && <small>· GST {items[activeItemIndex].gstRate}%</small>}</span>
+                  <strong className="text-base tabular-nums">{workspaceMoney(items[activeItemIndex].totalAmount ?? items[activeItemIndex].baseAmount)}</strong>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => {
+                      setShowItemModal(false);
+                      setTimeout(handleAddItemAndOpen, 300);
+                    }}
+                    type="button"
+                    disabled={!items[activeItemIndex].productId}
+                    className={workspace.secondary + ' flex-1 whitespace-nowrap'}
+                  >
+                    Save & Add Next
+                  </button>
+                  <button
+                    onClick={() => setShowItemModal(false)}
+                    type="button"
+                    disabled={!items[activeItemIndex].productId}
+                    className={workspace.primary + ' flex-1 whitespace-nowrap'}
+                  >
+                    Save & Done
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleRemoveItem(activeItemIndex);
+                      setShowItemModal(false);
+                    }}
+                    aria-label="Remove item"
+                    className={workspace.secondary + ' w-11 !px-0 text-red-600'}
+                  >
+                    <Trash2 className="w-6 h-6" />
+                  </button>
+                </div>
+
+
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Smart Calculator Modal */}
       {
@@ -2060,10 +2049,10 @@ const CreateInvoice: React.FC<CreateInvoiceProps> = ({ onSave, onCancel, initial
       }
 
       <footer className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-        <div className="mx-auto flex min-h-16 max-w-5xl items-center justify-between gap-3 px-4 py-2">
+        <div className="mx-auto flex min-h-14 max-w-5xl items-center justify-between gap-3 px-3 py-1.5 sm:px-4">
           <div className="min-w-0">
             <p className="text-xs font-medium text-muted-foreground">Total payable · {billItems.length} {billItems.length === 1 ? 'item' : 'items'}</p>
-            <p className="text-xl font-bold tabular-nums">{workspaceMoney(calculateRoundedTotal())}</p>
+            <p className="text-lg font-bold leading-tight tabular-nums">{workspaceMoney(calculateRoundedTotal())}</p>
           </div>
           <button type="button" onClick={handleSubmit} className={workspace.primary + ' shrink-0'}><Save size={17} /> Save</button>
         </div>

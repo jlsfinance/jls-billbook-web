@@ -19,6 +19,7 @@ interface AutocompleteProps {
   onCreate?: (query: string) => void;
   placeholder?: string;
   className?: string;
+  compact?: boolean;
   onKeyDown?: (e: React.KeyboardEvent) => void;
   inputRef?: (el: HTMLInputElement | null) => void;
   autoFocus?: boolean;
@@ -63,6 +64,7 @@ const Autocomplete: React.FC<AutocompleteProps> = ({
   onCreate,
   placeholder = "Search...",
   className = "",
+  compact = false,
   onKeyDown,
   inputRef,
   autoFocus,
@@ -177,12 +179,12 @@ const Autocomplete: React.FC<AutocompleteProps> = ({
   return (
     <div ref={wrapperRef} className={`relative ${className}`}>
       <div className="relative group">
-        <div className="absolute left-5 top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-google-blue transition-colors">
+        <div className={`absolute top-1/2 -translate-y-1/2 text-muted-foreground group-focus-within:text-google-blue transition-colors ${compact ? "left-3" : "left-5"}`}>
           {type === 'customer' ? <User className="w-5 h-5" /> : <Package className="w-5 h-5" />}
         </div>
         <input
           type="text"
-          className="w-full bg-surface-container-high border-2 border-transparent focus:border-google-blue/50 rounded-[28px] py-4 pl-14 pr-12 text-sm font-bold text-foreground placeholder:text-muted-foreground outline-none transition-all shadow-sm group-focus-within:shadow-google focus:ring-4 focus:ring-google-blue/10"
+          className={`w-full text-sm text-foreground outline-none transition-all placeholder:text-muted-foreground focus:border-google-blue/50 ${compact ? "min-h-11 rounded-xl border border-border bg-surface pl-10 pr-9 font-medium focus:ring-2 focus:ring-primary/20" : "rounded-[28px] border-2 border-transparent bg-surface-container-high py-4 pl-14 pr-12 font-bold shadow-sm focus:ring-4 focus:ring-google-blue/10 group-focus-within:shadow-google"}`}
           placeholder={placeholder}
           value={query}
           onChange={async (e) => {
@@ -217,7 +219,7 @@ const Autocomplete: React.FC<AutocompleteProps> = ({
           ref={inputRef}
           autoFocus={autoFocus}
         />
-        <div className="absolute right-5 top-1/2 -translate-y-1/2">
+        <div className={`absolute top-1/2 -translate-y-1/2 ${compact ? "right-3" : "right-5"}`}>
           <Search className="w-5 h-5 text-muted-foreground group-focus-within:text-google-blue transition-colors" />
         </div>
       </div>
@@ -228,7 +230,7 @@ const Autocomplete: React.FC<AutocompleteProps> = ({
             initial={{ opacity: 0, y: 12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.98, y: 12 }}
-            className="absolute z-[110] left-0 right-0 mt-3 bg-surface-container-highest backdrop-blur-2xl border border-border rounded-[32px] shadow-google-lg overflow-hidden p-2"
+            className={`absolute inset-x-0 z-[110] overflow-hidden border border-border shadow-google-lg ${compact ? "mt-1 rounded-xl bg-surface p-1" : "mt-3 rounded-[32px] bg-surface-container-highest p-2 backdrop-blur-2xl"}`}
           >
             <div className="max-h-[320px] overflow-y-auto space-y-1 no-scrollbar">
               {filteredOptions.length > 0 ? (
@@ -237,12 +239,12 @@ const Autocomplete: React.FC<AutocompleteProps> = ({
                     key={idx}
                     type="button"
                     onClick={() => handleSelect(option.id)}
-                    className={`w-full text-left p-4 rounded-[24px] flex items-center gap-4 transition-all relative group/item ${activeIndex === idx || value === option.id
+                    className={`w-full text-left flex items-center transition-all relative group/item ${compact ? "min-h-11 gap-2 rounded-lg p-2" : "gap-4 rounded-[24px] p-4"} ${activeIndex === idx || value === option.id
                       ? 'bg-google-blue text-white shadow-google'
                       : 'hover:bg-surface-container-high text-foreground'
                       }`}
                   >
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 transition-colors ${activeIndex === idx || value === option.id
+                    <div className={`rounded-full flex items-center justify-center shrink-0 transition-colors ${compact ? "h-8 w-8" : "h-12 w-12"} ${activeIndex === idx || value === option.id
                       ? 'bg-white/20'
                       : 'bg-surface-container-highest border border-border'
                       }`}>
