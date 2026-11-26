@@ -1,5 +1,6 @@
+import { WorkspaceHeading, WorkspaceMetrics, workspace, workspaceMoney } from './WorkspaceUI';
 import React, { useState } from 'react';
-import { ArrowLeft, Landmark, Plus, ArrowLeftRight, CheckCircle2, Wallet } from 'lucide-react';
+import { Plus, ArrowLeftRight, CheckCircle2, Wallet } from 'lucide-react';
 import { AccountTransaction, BankAccount } from '../types';
 import { StorageService } from '../services/storageService';
 import { formatDate } from '../utils/dateUtils';
@@ -10,6 +11,7 @@ interface CashAndBankProps {
 
 export const CashAndBank: React.FC<CashAndBankProps> = ({ onBack }) => {
   const [accounts, setAccounts] = useState<BankAccount[]>(() => StorageService.ensureDefaultAccounts());
+  const [ledgerAccountId, setLedgerAccountId] = useState('');
   const [txns, setTxns] = useState<AccountTransaction[]>(() => StorageService.getAccountTransactions());
   const [modalMode, setModalMode] = useState<'NONE' | 'ADD_ACCOUNT' | 'ADJUST'>('NONE');
   const [newAccName, setNewAccName] = useState('');
@@ -32,6 +34,9 @@ export const CashAndBank: React.FC<CashAndBankProps> = ({ onBack }) => {
 
   const totalCash = accounts.filter((a) => a.type === 'CASH').reduce((s, a) => s + (a.balance || 0), 0);
   const totalBank = accounts.filter((a) => a.type !== 'CASH').reduce((s, a) => s + (a.balance || 0), 0);
+
+  const visibleTransactions = ledgerAccountId ? txns.filter(tx => tx.accountId === ledgerAccountId || tx.toAccountId === ledgerAccountId) : txns;
+  const accountName = (id: string) => accounts.find(account => account.id === id)?.name || id;
 
   const handleCreateAccount = (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,52 +81,36 @@ export const CashAndBank: React.FC<CashAndBankProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-28">
-      <div className="sticky top-0 z-20 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {onBack && (
-            <button type="button" onClick={onBack} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-          )}
-          <div>
-            <h1 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <Landmark className="w-5 h-5 text-blue-600" />
-              Cash &amp; Bank Accounts
-            </h1>
-            <p className="text-xs text-slate-500">Live cash drawer, bank ledgers &amp; contra entries</p>
-          </div>
-        </div>
-        <div className="flex gap-2">
+    <div className="min-h-screen bg-surface-container-low pb-28">
+      <div className={workspace.titleBand}>
+        <WorkspaceHeading title="Cash & Bank Accounts" onBack={onBack} actions={
+          <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => setModalMode('ADJUST')}
-            className="px-3.5 py-2 rounded-full bg-slate-100 dark:bg-slate-800 text-xs font-bold flex items-center gap-1.5"
+            className={workspace.secondary}
           >
             <ArrowLeftRight className="w-4 h-4 text-blue-600" /> Transfer / Adjust
           </button>
           <button
             type="button"
             onClick={() => setModalMode('ADD_ACCOUNT')}
-            className="px-3.5 py-2 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center gap-1"
+            className={workspace.primary}
           >
             <Plus className="w-4 h-4" /> Add Bank
           </button>
         </div>
+        }>
+          Balances and account ledger
+        </WorkspaceHeading>
       </div>
 
-      <div className="max-w-5xl mx-auto p-4 space-y-5">
-        {/* Totals */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800">
-            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600">Cash in Hand</span>
-            <p className="text-2xl font-black text-slate-900 dark:text-white mt-1">₹{totalCash.toLocaleString('en-IN')}</p>
-          </div>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800">
-            <span className="text-[10px] font-black uppercase tracking-wider text-blue-600">Bank &amp; UPI Balances</span>
-            <p className="text-2xl font-black text-slate-900 dark:text-white mt-1">₹{totalBank.toLocaleString('en-IN')}</p>
-          </div>
-        </div>
+      <div className="mx-auto max-w-6xl px-4 pt-4 sm:px-6 space-y-5">
+        <WorkspaceMetrics values={[
+          { label: 'Cash in hand', value: workspaceMoney(totalCash), tone: 'positive' },
+          { label: 'Bank & UPI balances', value: workspaceMoney(totalBank) },
+        ]} />
+
 
         {/* Account Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -145,19 +134,23 @@ export const CashAndBank: React.FC<CashAndBankProps> = ({ onBack }) => {
 
         {/* Passbook / Reconciliation */}
         <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-            <h2 className="text-sm font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
-              Account Transactions &amp; Bank Reconciliation
-            </h2>
-            <span className="text-xs font-bold text-slate-400">{txns.length} entries</span>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+            <div>
+              <h2 className="font-semibold">Account ledger</h2>
+              <p className="text-xs text-muted-foreground">{visibleTransactions.length} entries</p>
+            </div>
+            <select aria-label="Filter ledger by account" className={workspace.input + ' sm:w-auto'} value={ledgerAccountId} onChange={event => setLedgerAccountId(event.target.value)}>
+              <option value="">All accounts</option>
+              {accounts.map(account => <option value={account.id} key={account.id}>{account.name}</option>)}
+            </select>
           </div>
           <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[420px] overflow-y-auto">
-            {txns.length === 0 ? (
-              <p className="p-8 text-center text-sm text-slate-400">No cash/bank movements yet.</p>
+            {visibleTransactions.length === 0 ? (
+              <p className="p-8 text-center text-sm text-slate-400">No transactions for the selected account.</p>
             ) : (
-              txns.map((tx) => {
+              visibleTransactions.map((tx) => {
                 const isCredit = tx.type === 'RECEIPT' || tx.type === 'CASH_SALE' || tx.type === 'ADD_MONEY';
-                const accName = accounts.find((a) => a.id === tx.accountId)?.name || tx.accountId;
+                const accountLabel = tx.toAccountId ? accountName(tx.accountId) + ' → ' + accountName(tx.toAccountId) : accountName(tx.accountId);
                 return (
                   <div key={tx.id} className="px-5 py-3.5 flex items-center justify-between gap-3">
                     <div>
@@ -165,7 +158,7 @@ export const CashAndBank: React.FC<CashAndBankProps> = ({ onBack }) => {
                         {tx.note || tx.partyName || tx.type}
                       </p>
                       <p className="text-xs text-slate-500">
-                        {formatDate(tx.date)} · {accName} · {tx.type.replace('_', ' ')}
+                        {formatDate(tx.date)} · {accountLabel} · {tx.type.replace('_', ' ')}
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -178,8 +171,9 @@ export const CashAndBank: React.FC<CashAndBankProps> = ({ onBack }) => {
                           StorageService.toggleTransactionReconciled(tx.id);
                           refresh();
                         }}
-                        title="Toggle Bank Reconciled"
-                        className={`p-1.5 rounded-full transition-colors ${
+                        aria-label="Toggle bank reconciliation"
+                        aria-pressed={Boolean(tx.reconciled)}
+                        className={`grid min-h-10 min-w-10 place-items-center rounded-xl transition-colors ${
                           tx.reconciled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
                         }`}
                       >

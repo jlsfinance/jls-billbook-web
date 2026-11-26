@@ -1,8 +1,9 @@
+import { WorkspaceHeading, workspace } from './WorkspaceUI';
 
 import React, { useState, useEffect } from 'react';
 import { Customer, Product, Invoice, InvoiceItem } from '../types';
 import { StorageService } from '../services/storageService';
-import { Save, ArrowLeft, Package, Sparkles, Users, Banknote } from 'lucide-react';
+import { Save, Package, Sparkles, Users, Banknote } from 'lucide-react';
 import Autocomplete from './Autocomplete';
 import { useCompany } from '@/contexts/CompanyContext';
 import { motion, AnimatePresence, useScroll, useMotionValueEvent } from 'framer-motion';
@@ -511,30 +512,14 @@ const CreatePurchase: React.FC<CreatePurchaseProps> = ({ onSave, onCancel, initi
 
             {/* Header */}
             <motion.div className={`sticky top-0 z-30 transition-all duration-300 ${isScrolled ? 'bg-background/95 backdrop-blur-xl border-b border-border shadow-sm' : 'bg-background'}`}>
-                <div className="flex items-center justify-between px-4 h-16 max-w-5xl mx-auto">
-                    <button onClick={onCancel} className="p-2 -ml-2 rounded-full hover:bg-slate-100">
-                        <ArrowLeft className="w-6 h-6" />
-                    </button>
-                    <h1 className="text-xl font-bold tracking-tight">Record Purchase</h1>
-
-                    <div className="flex items-center gap-2">
-                        <button
-                            onClick={handleScanBill}
-                            disabled={isAnalyzing}
-                            className={`px-4 py-2 rounded-full font-bold flex items-center gap-2 transition-all ${isAnalyzing ? 'bg-indigo-100 text-indigo-400' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20'}`}
-                        >
-                            {isAnalyzing ? (
-                                <span className="animate-spin w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full" />
-                            ) : (
-                                <Sparkles className="w-4 h-4" />
-                            )}
-                            {isAnalyzing ? 'Scanning...' : 'AI Scan'}
+                <div className={workspace.titleBand + ' pb-3'}>
+                    <WorkspaceHeading title={initialPurchase ? 'Edit Purchase' : 'Record Purchase'} onBack={onCancel} actions={<>
+                        <button type="button" onClick={handleScanBill} disabled={isAnalyzing} className={workspace.secondary}>
+                            {isAnalyzing ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <Sparkles size={17} />}
+                            {isAnalyzing ? 'Scanning…' : 'AI Scan'}
                         </button>
-
-                        <button onClick={handleSubmit} className="bg-orange-600 text-white px-6 py-2 rounded-full font-bold shadow-lg shadow-orange-500/20 flex items-center gap-2">
-                            <Save className="w-5 h-5" /> Save
-                        </button>
-                    </div>
+                        <button type="button" onClick={handleSubmit} className={workspace.primary}><Save size={17} /> Save</button>
+                    </>} />
                 </div>
             </motion.div>
 

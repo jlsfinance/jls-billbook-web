@@ -1,5 +1,6 @@
+import { WorkspaceHeading, workspace } from './WorkspaceUI';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Store, Share2, ShoppingBag, CheckCircle2 } from 'lucide-react';
+import { Share2, ShoppingBag, CheckCircle2 } from 'lucide-react';
 import { Product } from '../types';
 import { StorageService } from '../services/storageService';
 import { useAuth } from '../contexts/AuthContext';
@@ -105,29 +106,19 @@ export const OnlineStoreManager: React.FC<OnlineStoreManagerProps> = ({ onBack }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-28">
-      <div className="sticky top-0 z-20 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {onBack && (
-            <button type="button" onClick={onBack} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-          )}
-          <div>
-            <h1 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <Store className="w-5 h-5 text-emerald-600" />
-              Online Dukaan (Catalogue Store)
-            </h1>
-            <p className="text-xs text-slate-500">WhatsApp storefront &amp; item visibility manager</p>
-          </div>
-        </div>
-        <button
+    <div className="min-h-screen bg-surface-container-low pb-28">
+      <div className={workspace.titleBand}>
+        <WorkspaceHeading title="Online Dukaan" onBack={onBack} actions={
+          <button
           type="button"
           onClick={shareCatalogLink}
-          className="px-4 py-2 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5"
+          className={workspace.primary}
         >
           <Share2 className="w-4 h-4" /> {published && publicUrl ? 'Share store link' : 'Share catalogue summary'}
         </button>
+        }>
+          Manage catalogue visibility and share your storefront.
+        </WorkspaceHeading>
       </div>
 
       <div className="max-w-5xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-5">

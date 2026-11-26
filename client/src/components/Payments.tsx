@@ -1,8 +1,9 @@
+import { WorkspaceHeading, WorkspaceFilters, workspace } from './WorkspaceUI';
 
 import React, { useState, useMemo } from 'react';
 import { Payment, Customer, PaymentAllocation } from '../types';
 import { StorageService } from '../services/storageService';
-import { Plus, ArrowLeft, ArrowDownLeft, Edit2, Trash2, X } from 'lucide-react';
+import { Plus, ArrowDownLeft, Edit2, Trash2, X } from 'lucide-react';
 import Autocomplete from './Autocomplete';
 import { HapticService } from '@/services/hapticService';
 import { formatDate } from '../utils/dateUtils';
@@ -178,47 +179,18 @@ const Payments: React.FC<PaymentsProps> = ({ onBack, initialPayment, initialCust
     };
 
     return (
-        <div className="bg-slate-50 dark:bg-slate-900 min-h-screen flex flex-col">
-            {/* Header with Tabs */}
-            <div className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10">
-                <div className="flex items-center justify-between px-4 pt-safe pb-2">
-                    <div className="flex items-center gap-3">
-                        <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700">
-                            <ArrowLeft className="w-6 h-6 text-slate-600 dark:text-slate-300" />
-                        </button>
-                        <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Transaction History</h1>
-                    </div>
-                    <button
-                        onClick={() => handleOpenAdd()}
-                        className={`${activeTab === 'PAID' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'} text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors`}
-                    >
-                        <Plus className="w-5 h-5" />
-                        <span className="hidden sm:inline">
-                            {activeTab === 'PAID' ? 'Make Payment' : activeTab === 'RECEIVED' ? 'New Receipt' : 'New Transaction'}
-                        </span>
-                    </button>
-                </div>
-
-                {/* Tabs */}
-                <div className="flex px-4 pb-0 gap-6 overflow-x-auto no-scrollbar">
-                    <button onClick={() => setActiveTab('ALL')} className={`pb-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${activeTab === 'ALL' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-                        All
-                    </button>
-                    <button onClick={() => setActiveTab('RECEIVED')} className={`pb-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${activeTab === 'RECEIVED' ? 'border-green-600 text-green-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-                        Receipts (In)
-                    </button>
-                    <button onClick={() => setActiveTab('PAID')} className={`pb-3 text-sm font-bold border-b-2 transition-all whitespace-nowrap ${activeTab === 'PAID' ? 'border-red-600 text-red-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-                        Payments (Out)
-                    </button>
-                </div>
-            </div>
-
-            {/* List */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-24">
+        <div className="bg-surface-container-low min-h-screen">
+            <div className={workspace.page}>
+                <WorkspaceHeading title="Transaction History" onBack={onBack} actions={<button type="button" onClick={() => handleOpenAdd()} className={workspace.primary}>
+                    <Plus size={17} /> {activeTab === 'PAID' ? 'Make Payment' : activeTab === 'RECEIVED' ? 'New Receipt' : 'New Transaction'}
+                </button>} />
+                <WorkspaceFilters label="Transaction type" value={activeTab} onChange={setActiveTab} options={[
+                    { id: 'ALL', label: 'All' }, { id: 'RECEIVED', label: 'Receipts (In)' }, { id: 'PAID', label: 'Payments (Out)' },
+                ]} />
                 {filteredPayments.length === 0 ? (
                     <div className="text-center py-20 text-slate-400">
                         <ArrowDownLeft className="w-16 h-16 mx-auto mb-4 opacity-20" />
-                        <p>No payments received yet.</p>
+                        <p>No transactions in this view.</p>
                     </div>
                 ) : (
                     filteredPayments.slice().reverse().map(payment => (
@@ -242,7 +214,7 @@ const Payments: React.FC<PaymentsProps> = ({ onBack, initialPayment, initialCust
                                         {payment.type === 'PAID' ? '-' : '+'}₹{payment.amount.toLocaleString('en-IN')}
                                     </span>
                                 </div>
-                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="flex gap-1 opacity-100 transition-opacity">
                                     <button onClick={() => handleEdit(payment)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-slate-400 hover:text-blue-600">
                                         <Edit2 className="w-4 h-4" />
                                     </button>

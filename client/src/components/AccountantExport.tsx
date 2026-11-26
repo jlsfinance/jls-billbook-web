@@ -1,5 +1,6 @@
+import { WorkspaceHeading, workspace } from './WorkspaceUI';
 import { useState } from 'react';
-import { ArrowLeft, Download } from 'lucide-react';
+import { Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { StorageService } from '../services/storageService';
 import type { Invoice } from '../types';
@@ -113,14 +114,8 @@ export default function AccountantExport({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 p-4 pb-24 sm:p-8">
-      <button type="button" onClick={onBack} className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 dark:text-blue-400">
-        <ArrowLeft size={16} /> Back
-      </button>
-      <div>
-        <h1 className="text-2xl font-bold">Accountant export</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Download the current company's records for a selected period.</p>
-      </div>
+    <div className={workspace.page}>
+      <WorkspaceHeading title="Accountant export" onBack={onBack}>Download the current company’s records for a selected period.</WorkspaceHeading>
       <form onSubmit={download} className="space-y-5 rounded-2xl border bg-card p-5">
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="grid gap-2 text-sm font-medium">From

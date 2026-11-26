@@ -1,5 +1,6 @@
+import { WorkspaceHeading, workspace } from './WorkspaceUI';
 import React, { useState } from 'react';
-import { ArrowLeft, Repeat, Plus, Play, Pause, Pencil, Trash2, Calendar } from 'lucide-react';
+import { Plus, Play, Pause, Pencil, Trash2, Calendar } from 'lucide-react';
 import { AutomatedBill } from '../types';
 import { StorageService } from '../services/storageService';
 import { formatDate } from '../utils/dateUtils';
@@ -101,33 +102,23 @@ export const AutomatedBills: React.FC<AutomatedBillsProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-28">
-      <div className="sticky top-0 z-20 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {onBack && (
-            <button type="button" onClick={onBack} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-          )}
-          <div>
-            <h1 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <Repeat className="w-5 h-5 text-blue-600" />
-              Automated / Recurring Bills
-            </h1>
-            <p className="text-xs text-slate-500">Bills run when Dashboard opens or when you select Run Due Now.</p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <button type="button" onClick={handleRunDue} className="px-3.5 py-2 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center gap-1">
+    <div className="min-h-screen bg-surface-container-low pb-28">
+      <div className={workspace.titleBand}>
+        <WorkspaceHeading title="Automated Bills" onBack={onBack} actions={
+          <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={handleRunDue} className={workspace.primary}>
             <Play className="w-3.5 h-3.5" /> Run Due Now
           </button>
-          <button type="button" onClick={() => openSchedule(null)} className="px-3.5 py-2 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center gap-1">
+          <button type="button" onClick={() => openSchedule(null)} className={workspace.primary}>
             <Plus className="w-4 h-4" /> New Schedule
           </button>
         </div>
+        }>
+          Run due bills or set up a recurring schedule.
+        </WorkspaceHeading>
       </div>
 
-      <div className="max-w-4xl mx-auto p-4 space-y-3">
+      <div className="mx-auto max-w-6xl px-4 pt-4 sm:px-6 space-y-3">
         {runResult && (
           <div role="status" className="space-y-1 rounded-2xl border bg-card p-3 text-sm">
             <p className="font-semibold">{runResult.created || runResult.recovered || runResult.issues.length

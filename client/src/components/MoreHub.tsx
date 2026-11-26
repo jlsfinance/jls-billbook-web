@@ -8,10 +8,11 @@ import { AppLanguage, getAppLanguage, setAppLanguage } from '../services/i18n';
 import { WorkspaceHeading, workspace } from './WorkspaceUI';
 
 interface MoreHubProps {
+  onBack?: () => void;
   onNavigate: (view: ViewState, voucherType?: VoucherType) => void;
 }
 
-export const MoreHub: React.FC<MoreHubProps> = ({ onNavigate }) => {
+export const MoreHub: React.FC<MoreHubProps> = ({ onNavigate, onBack }) => {
   const [lang, setLang] = useState<AppLanguage>(() => getAppLanguage());
   const [search, setSearch] = useState('');
 
@@ -47,7 +48,7 @@ export const MoreHub: React.FC<MoreHubProps> = ({ onNavigate }) => {
       ],
     },
     {
-      title: 'Accounting, Compliance & Growth',
+      title: 'Accounts & Reports',
       items: [
         { label: 'Cash & Bank', icon: Landmark, color: 'bg-emerald-50 text-emerald-600', onClick: () => onNavigate(ViewState.CASH_AND_BANK) },
         { label: 'Payments In & Out', icon: ArrowUpRight, color: 'bg-teal-50 text-teal-700', onClick: () => onNavigate(ViewState.PAYMENTS) },
@@ -55,6 +56,11 @@ export const MoreHub: React.FC<MoreHubProps> = ({ onNavigate }) => {
         { label: 'E-Invoice / Tally', icon: ShieldCheck, color: 'bg-indigo-50 text-indigo-600', onClick: () => onNavigate(ViewState.COMPLIANCE_CENTER) },
         { label: 'Reports & GST', icon: BarChart3, color: 'bg-blue-50 text-blue-600', onClick: () => onNavigate(ViewState.REPORTS) },
         { label: 'Accountant Export', icon: FileDown, color: 'bg-sky-50 text-sky-700', onClick: () => onNavigate(ViewState.ACCOUNTANT_EXPORT) },
+      ],
+    },
+    {
+      title: 'Business & Team',
+      items: [
         { label: 'Loyalty & Campaigns', icon: Gift, color: 'bg-pink-50 text-pink-700', onClick: () => onNavigate(ViewState.CUSTOMER_ENGAGEMENT) },
         { label: 'Pay Reminders', icon: BellRing, color: 'bg-green-50 text-green-600', onClick: () => onNavigate(ViewState.PAYMENT_REMINDERS) },
         { label: 'Online Dukaan', icon: Store, color: 'bg-teal-50 text-teal-600', onClick: () => onNavigate(ViewState.ONLINE_STORE) },
@@ -73,7 +79,7 @@ export const MoreHub: React.FC<MoreHubProps> = ({ onNavigate }) => {
   return (
     <div className="min-h-screen bg-surface-container-low">
       <div className={workspace.page}>
-        <WorkspaceHeading title="Business tools" />
+        <WorkspaceHeading title="Business tools" onBack={onBack} />
         <label className={workspace.input + ' flex items-center gap-2'}>
             <Search size={18} aria-hidden="true" className="shrink-0 text-muted-foreground" />
             <input type="search" aria-label="Search business tools" placeholder="Search tools" value={search} onChange={event => setSearch(event.target.value)}
@@ -83,12 +89,12 @@ export const MoreHub: React.FC<MoreHubProps> = ({ onNavigate }) => {
         {matchingGroups.map((grp) => (
           <section key={grp.title} className={workspace.panel + ' p-3 sm:p-4'}>
             <h2 className="text-sm font-semibold mb-2 px-1">{grp.title}</h2>
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
               {grp.items.map((item) => (
                 <button key={item.label} type="button" onClick={item.onClick}
-                  className="min-h-20 rounded-xl border border-transparent hover:border-border hover:bg-accent flex flex-col items-center justify-center text-center gap-1.5 px-1.5">
-                  <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${item.color}`}><item.icon className="w-[18px] h-[18px]" /></span>
-                  <span className="text-xs font-medium leading-tight">{item.label}</span>
+                  className="flex min-h-14 min-w-0 items-center gap-2 rounded-xl border border-border bg-surface-container-low px-2 text-left hover:bg-accent focus-visible:ring-2 focus-visible:ring-primary/50">
+                  <span className={`h-8 w-8 shrink-0 rounded-lg flex items-center justify-center ${item.color}`}><item.icon className="w-[18px] h-[18px]" /></span>
+                  <span className="min-w-0 text-xs font-semibold leading-tight sm:text-sm">{item.label}</span>
                 </button>
               ))}
             </div>
@@ -112,6 +118,7 @@ export const MoreHub: React.FC<MoreHubProps> = ({ onNavigate }) => {
               <button
                 key={l.id}
                 type="button"
+                aria-pressed={lang === l.id}
                 onClick={() => handleLangChange(l.id)}
                 className={`px-3 py-1.5 rounded-full text-xs font-bold border ${
                   lang === l.id

@@ -1,3 +1,4 @@
+import { WorkspaceHeading, workspace } from './WorkspaceUI';
 import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -368,26 +369,16 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
   // ---------------------------------------------------------------- session
   return (
     <div className="min-h-[100dvh] bg-surface-container-low pb-32">
-      <div className="pt-safe pb-6 px-6 bg-surface-container-low sticky top-0 z-30">
-        <div className="max-w-3xl mx-auto flex items-start justify-between gap-4">
-          <div>
-            <button onClick={onBack} className="flex items-center gap-2 text-muted-foreground font-black text-xs uppercase tracking-widest mb-3">
-              <ArrowLeft className="w-4 h-4" /> Back
-            </button>
-            <span className="text-[11px] font-black text-google-blue uppercase tracking-[0.3em] block mb-1">Inventory</span>
-            <h1 className="text-3xl font-black font-heading text-foreground leading-none">Stock In</h1>
-          </div>
-          <div className="text-right">
-            <p className="text-2xl font-black font-heading text-foreground">{lines.length}</p>
-            <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Lines</p>
-          </div>
-        </div>
+      <div className={workspace.titleBand + ' !max-w-3xl pb-4'}>
+        <WorkspaceHeading title="Stock In" onBack={onBack}>
+          {lines.length} {lines.length === 1 ? 'item' : 'items'} in this entry
+        </WorkspaceHeading>
       </div>
 
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl mx-auto px-6 space-y-6">
         <div className="bg-surface rounded-[28px] border border-border p-6">
           <BarcodeScanField
-            label="Scan barcode — pehla aur main action"
+            label="Scan barcode"
             autoFocus
             onScan={handleScan}
             continuous

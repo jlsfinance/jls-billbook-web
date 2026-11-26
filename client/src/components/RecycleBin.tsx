@@ -1,5 +1,6 @@
+import { WorkspaceHeading, workspace } from './WorkspaceUI';
 import React, { useState } from 'react';
-import { ArrowLeft, Trash2, RotateCcw } from 'lucide-react';
+import { RotateCcw } from 'lucide-react';
 import { StorageService } from '../services/storageService';
 import { formatDate } from '../utils/dateUtils';
 
@@ -50,25 +51,14 @@ export const RecycleBin: React.FC<RecycleBinProps> = ({ onBack }) => {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-28">
-      <div className="sticky top-0 z-20 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {onBack && (
-            <button type="button" onClick={onBack} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-          )}
-          <div>
-            <h1 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <Trash2 className="w-5 h-5 text-rose-600" />
-              Recycle Bin ({rows.length})
-            </h1>
-            <p className="text-xs text-slate-500">Recover accidentally deleted vouchers, payments or expenses</p>
-          </div>
-        </div>
+    <div className="min-h-screen bg-surface-container-low pb-28">
+      <div className={workspace.titleBand}>
+        <WorkspaceHeading title="Recycle Bin" onBack={onBack}>
+          Recover deleted vouchers, payments or expenses. {rows.length > 0 && <span>· {rows.length} deleted</span>}
+        </WorkspaceHeading>
       </div>
 
-      <div className="max-w-4xl mx-auto p-4 space-y-3">
+      <div className="mx-auto max-w-6xl px-4 pt-4 sm:px-6 space-y-3">
         {rows.length === 0 ? (
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-12 text-center text-slate-400">
             Recycle bin is empty.

@@ -1,6 +1,7 @@
+import { WorkspaceHeading, workspace } from './WorkspaceUI';
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ArrowLeft, ExternalLink } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompany } from '../contexts/CompanyContext';
 import { StorageService } from '../services/storageService';
@@ -121,9 +122,8 @@ function EngagementWorkspace({ scope, onBack }: {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5 p-4 pb-24 sm:p-8">
-      <button type="button" onClick={onBack} className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 dark:text-blue-400"><ArrowLeft size={16} /> Back</button>
-      <h1 className="text-2xl font-bold">Customer engagement</h1>
+    <div className={workspace.page}>
+      <WorkspaceHeading title="Customer engagement" onBack={onBack} />
       <nav aria-label="Customer engagement" className="flex flex-wrap gap-2">
         {tabs.map(item => (
           <button key={item} type="button" aria-pressed={tab === item} onClick={() => { setTab(item); setError(''); setStatus(''); setConsent(false); }}

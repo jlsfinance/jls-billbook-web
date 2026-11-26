@@ -1,5 +1,6 @@
+import { WorkspaceHeading, workspace } from './WorkspaceUI';
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, Printer, Plus, Minus, Barcode as BarcodeIcon, RefreshCw, Search } from 'lucide-react';
+import { Printer, Plus, Minus, Barcode as BarcodeIcon, RefreshCw, Search } from 'lucide-react';
 import { StorageService } from '../services/storageService';
 import { Product } from '../types';
 
@@ -253,37 +254,22 @@ export const BarcodeLabelGenerator: React.FC<BarcodeLabelGeneratorProps> = ({ on
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-28">
+    <div className="min-h-screen bg-surface-container-low pb-28">
       {/* Header */}
-      <div className="sticky top-0 z-20 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {onBack && (
-            <button
-              type="button"
-              onClick={onBack}
-              className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
-            >
-              <ArrowLeft className="w-5 h-5 text-slate-700 dark:text-slate-200" />
-            </button>
-          )}
-          <div>
-            <h1 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <BarcodeIcon className="w-5 h-5 text-blue-600" />
-              Barcode Label Studio
-            </h1>
-            <p className="text-xs text-slate-500">Generate & print Code-128 stickers for A4 or Thermal rolls</p>
-          </div>
-        </div>
-
-        <button
+      <div className={workspace.titleBand}>
+        <WorkspaceHeading title="Barcode Label Studio" onBack={onBack} actions={
+          <button
           type="button"
           onClick={handlePrintLabels}
           disabled={expandedLabels.length === 0}
-          className="px-4 py-2.5 rounded-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-2 shadow-md"
+          className={workspace.primary}
         >
           <Printer className="w-4 h-4" />
           Print {expandedLabels.length} Labels
         </button>
+        }>
+          Print Code 128 stickers on A4 or thermal rolls.
+        </WorkspaceHeading>
       </div>
 
       <div className="max-w-6xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-5">

@@ -54,12 +54,21 @@ import GlobalSearch from '@/components/GlobalSearch';
 import { ANNOUNCEMENTS_PANEL } from '@/components/AdminAdsManager';
 
 const STARTUP_WAIT_MS = 12_000;
-const routesWithBack = new Set([
+const documentRoutesWithBack = [
     ViewState.VIEW_INVOICE, ViewState.CUSTOMER_LEDGER, ViewState.CREATE_INVOICE, ViewState.EDIT_INVOICE,
     ViewState.CREATE_VOUCHER, ViewState.CREATE_CREDIT_NOTE, ViewState.CREATE_PURCHASE, ViewState.EDIT_PURCHASE,
+];
+const routesWithBack = new Set([
+    ...documentRoutesWithBack, ViewState.SETTINGS, ViewState.STOCK_IN, ViewState.EXPENSES, ViewState.PAYMENTS,
+    ViewState.REPORTS, ViewState.POS_BILLING, ViewState.CASH_AND_BANK, ViewState.GODOWNS, ViewState.BARCODE_LABELS,
+    ViewState.ONLINE_STORE, ViewState.PAYMENT_REMINDERS, ViewState.AUTOMATED_BILLS, ViewState.COMPLIANCE_CENTER,
+    ViewState.ACCOUNTANT_EXPORT, ViewState.CUSTOMER_ENGAGEMENT, ViewState.STAFF_ROLES, ViewState.RECYCLE_BIN,
+    ViewState.MORE_HUB, ViewState.SMART_CALCULATOR, ViewState.DAYBOOK, ViewState.INVENTORY, ViewState.CUSTOMERS, ViewState.ALL_INVOICES, ViewState.INVOICES,
+    ViewState.PURCHASES, ViewState.QUOTATIONS, ViewState.PROFORMA_INVOICES, ViewState.DELIVERY_CHALLANS,
+    ViewState.PURCHASE_ORDERS, ViewState.DEBIT_NOTES,
 ]);
 const routesWithOwnSearch = new Set([
-    ...routesWithBack, ViewState.CUSTOMERS, ViewState.INVENTORY, ViewState.ALL_INVOICES, ViewState.INVOICES,
+    ...documentRoutesWithBack, ViewState.CUSTOMERS, ViewState.INVENTORY, ViewState.ALL_INVOICES, ViewState.INVOICES,
     ViewState.PURCHASES, ViewState.QUOTATIONS, ViewState.PROFORMA_INVOICES, ViewState.DELIVERY_CHALLANS,
     ViewState.PURCHASE_ORDERS, ViewState.DEBIT_NOTES, ViewState.DAYBOOK, ViewState.REPORTS, ViewState.MORE_HUB,
     ViewState.POS_BILLING, ViewState.STOCK_IN,
@@ -107,7 +116,15 @@ const AccountingApp: React.FC = () => {
     const [currentView, updateCurrentView] = useState<ViewState>(() => announcementsOpen ? ViewState.SETTINGS : ViewState.DASHBOARD);
     const returnViews = React.useRef<Partial<Record<ViewState, ViewState>>>({});
     const setCurrentView = (next: ViewState) => {
-        if (next !== currentView && routesWithBack.has(next)) returnViews.current[next] = currentView;
+        if (next !== currentView && routesWithBack.has(next)) {
+            const visited = new Set<ViewState>();
+            let ancestor: ViewState | undefined = currentView;
+            while (ancestor && !visited.has(ancestor)) {
+                visited.add(ancestor);
+                ancestor = returnViews.current[ancestor];
+            }
+            if (!visited.has(next)) returnViews.current[next] = currentView;
+        }
         updateCurrentView(next);
     };
     const backToSource = (fallback = ViewState.DASHBOARD) => updateCurrentView(returnViews.current[currentView] ?? fallback);
@@ -477,15 +494,17 @@ const AccountingApp: React.FC = () => {
 
                             {currentView === ViewState.INVENTORY && (
                                 <Inventory
+                                    onBack={() => backToSource()}
                                     onOpenStockIn={() => setCurrentView(ViewState.STOCK_IN)}
                                     onOpenBarcodeLabels={() => setCurrentView(ViewState.BARCODE_LABELS)}
                                 />
                             )}
                             {currentView === ViewState.STOCK_IN && (
-                                <StockIn onBack={() => setCurrentView(ViewState.INVENTORY)} />
+                                <StockIn onBack={() => backToSource(ViewState.INVENTORY)} />
                             )}
                             {(currentView === ViewState.CUSTOMERS || currentView === ViewState.CUSTOMER_LEDGER) && (
                                 <Customers
+                                    onBackToWorkspace={() => backToSource()}
                                     onEditInvoice={handleEditInvoice}
                                     initialCustomerId={currentView === ViewState.CUSTOMER_LEDGER ? selectedCustomerId || undefined : undefined}
                                     onBack={() => {
@@ -494,12 +513,13 @@ const AccountingApp: React.FC = () => {
                                     }}
                                 />
                             )}
-                            {currentView === ViewState.DAYBOOK && <Daybook onViewCustomerLedger={handleViewCustomerLedger} onViewInvoice={handleViewInvoice} />}
-                            {currentView === ViewState.EXPENSES && <Expenses onBack={() => setCurrentView(ViewState.DASHBOARD)} />}
-                            {currentView === ViewState.PAYMENTS && <Payments onBack={() => setCurrentView(ViewState.DASHBOARD)} createDirection={paymentCreateDirection} onCreateOpened={clearPaymentCreate} />}
-                            {currentView === ViewState.REPORTS && <Reports onBack={() => setCurrentView(ViewState.DASHBOARD)} />}
+                            {currentView === ViewState.DAYBOOK && <Daybook onBack={() => backToSource()} onViewCustomerLedger={handleViewCustomerLedger} onViewInvoice={handleViewInvoice} />}
+                            {currentView === ViewState.EXPENSES && <Expenses onBack={() => backToSource()} />}
+                            {currentView === ViewState.PAYMENTS && <Payments onBack={() => backToSource()} createDirection={paymentCreateDirection} onCreateOpened={clearPaymentCreate} />}
+                            {currentView === ViewState.REPORTS && <Reports onBack={() => backToSource()} />}
                             {(currentView === ViewState.ALL_INVOICES || currentView === ViewState.INVOICES) && (
                                 <AllInvoices
+                                    onBack={() => backToSource()}
                                     title="Sales"
                                     createLabel="Add Sale"
                                     onCreate={() => { setActiveVoucherType('SALE'); setInvoiceToEdit(null); setCurrentView(ViewState.CREATE_INVOICE); }}
@@ -510,38 +530,38 @@ const AccountingApp: React.FC = () => {
                                     onConverted={(conv) => { setSelectedInvoice(conv); setCurrentView(ViewState.VIEW_INVOICE); }}
                                 />
                             )}
-                            {currentView === ViewState.PURCHASES && <AllInvoices title="Purchases" createLabel="Add Purchase" invoices={purchases} onCreate={() => setCurrentView(ViewState.CREATE_PURCHASE)} onView={handleViewInvoice} onEdit={handleEditPurchase} onDelete={handleDeletePurchase} onViewLedger={handleViewCustomerLedger} />}
+                            {currentView === ViewState.PURCHASES && <AllInvoices onBack={() => backToSource()} title="Purchases" createLabel="Add Purchase" invoices={purchases} onCreate={() => setCurrentView(ViewState.CREATE_PURCHASE)} onView={handleViewInvoice} onEdit={handleEditPurchase} onDelete={handleDeletePurchase} onViewLedger={handleViewCustomerLedger} />}
                             {currentView === ViewState.QUOTATIONS && (
-                                <AllInvoices title="Quotations" createLabel="New Quotation" initialDocFilter="QUOTATION" onCreate={() => { setActiveVoucherType('QUOTATION'); setInvoiceToEdit(null); setCurrentView(ViewState.CREATE_VOUCHER); }} onView={handleViewInvoice} onEdit={handleEditInvoice} onDelete={handleDeleteInvoice} onConverted={(conv) => { setSelectedInvoice(conv); setCurrentView(ViewState.VIEW_INVOICE); }} />
+                                <AllInvoices onBack={() => backToSource()} title="Quotations" createLabel="New Quotation" initialDocFilter="QUOTATION" onCreate={() => { setActiveVoucherType('QUOTATION'); setInvoiceToEdit(null); setCurrentView(ViewState.CREATE_VOUCHER); }} onView={handleViewInvoice} onEdit={handleEditInvoice} onDelete={handleDeleteInvoice} onConverted={(conv) => { setSelectedInvoice(conv); setCurrentView(ViewState.VIEW_INVOICE); }} />
                             )}
                             {currentView === ViewState.PROFORMA_INVOICES && (
-                                <AllInvoices title="Proforma Invoices" createLabel="New Proforma" initialDocFilter="PROFORMA" onCreate={() => { setActiveVoucherType('PROFORMA'); setInvoiceToEdit(null); setCurrentView(ViewState.CREATE_VOUCHER); }} onView={handleViewInvoice} onEdit={handleEditInvoice} onDelete={handleDeleteInvoice} onConverted={(conv) => { setSelectedInvoice(conv); setCurrentView(ViewState.VIEW_INVOICE); }} />
+                                <AllInvoices onBack={() => backToSource()} title="Proforma Invoices" createLabel="New Proforma" initialDocFilter="PROFORMA" onCreate={() => { setActiveVoucherType('PROFORMA'); setInvoiceToEdit(null); setCurrentView(ViewState.CREATE_VOUCHER); }} onView={handleViewInvoice} onEdit={handleEditInvoice} onDelete={handleDeleteInvoice} onConverted={(conv) => { setSelectedInvoice(conv); setCurrentView(ViewState.VIEW_INVOICE); }} />
                             )}
                             {currentView === ViewState.DELIVERY_CHALLANS && (
-                                <AllInvoices title="Delivery Challans" createLabel="New Challan" initialDocFilter="DELIVERY_CHALLAN" onCreate={() => { setActiveVoucherType('DELIVERY_CHALLAN'); setInvoiceToEdit(null); setCurrentView(ViewState.CREATE_VOUCHER); }} onView={handleViewInvoice} onEdit={handleEditInvoice} onDelete={handleDeleteInvoice} onConverted={(conv) => { setSelectedInvoice(conv); setCurrentView(ViewState.VIEW_INVOICE); }} />
+                                <AllInvoices onBack={() => backToSource()} title="Delivery Challans" createLabel="New Challan" initialDocFilter="DELIVERY_CHALLAN" onCreate={() => { setActiveVoucherType('DELIVERY_CHALLAN'); setInvoiceToEdit(null); setCurrentView(ViewState.CREATE_VOUCHER); }} onView={handleViewInvoice} onEdit={handleEditInvoice} onDelete={handleDeleteInvoice} onConverted={(conv) => { setSelectedInvoice(conv); setCurrentView(ViewState.VIEW_INVOICE); }} />
                             )}
                             {currentView === ViewState.PURCHASE_ORDERS && (
-                                <AllInvoices title="Purchase Orders" createLabel="New PO" initialDocFilter="PURCHASE_ORDER" onCreate={() => { setActiveVoucherType('PURCHASE_ORDER'); setInvoiceToEdit(null); setCurrentView(ViewState.CREATE_VOUCHER); }} onView={handleViewInvoice} onEdit={handleEditInvoice} onDelete={handleDeletePurchase} onConverted={(conv) => { setSelectedInvoice(conv); setCurrentView(ViewState.VIEW_INVOICE); }} />
+                                <AllInvoices onBack={() => backToSource()} title="Purchase Orders" createLabel="New PO" initialDocFilter="PURCHASE_ORDER" onCreate={() => { setActiveVoucherType('PURCHASE_ORDER'); setInvoiceToEdit(null); setCurrentView(ViewState.CREATE_VOUCHER); }} onView={handleViewInvoice} onEdit={handleEditInvoice} onDelete={handleDeletePurchase} onConverted={(conv) => { setSelectedInvoice(conv); setCurrentView(ViewState.VIEW_INVOICE); }} />
                             )}
                             {currentView === ViewState.DEBIT_NOTES && (
-                                <AllInvoices title="Debit Notes" createLabel="New Debit Note" initialDocFilter="DEBIT_NOTE" onCreate={() => { setActiveVoucherType('DEBIT_NOTE'); setInvoiceToEdit(null); setCurrentView(ViewState.CREATE_VOUCHER); }} onView={handleViewInvoice} onEdit={handleEditInvoice} onDelete={handleDeletePurchase} />
+                                <AllInvoices onBack={() => backToSource()} title="Debit Notes" createLabel="New Debit Note" initialDocFilter="DEBIT_NOTE" onCreate={() => { setActiveVoucherType('DEBIT_NOTE'); setInvoiceToEdit(null); setCurrentView(ViewState.CREATE_VOUCHER); }} onView={handleViewInvoice} onEdit={handleEditInvoice} onDelete={handleDeletePurchase} />
                             )}
-                            {currentView === ViewState.SETTINGS && <Settings />}
+                            {currentView === ViewState.SETTINGS && <Settings onBack={() => backToSource()} />}
 
-                            {currentView === ViewState.POS_BILLING && <POSBilling onBack={() => setCurrentView(ViewState.DASHBOARD)} />}
-                            {currentView === ViewState.CASH_AND_BANK && <CashAndBank onBack={() => setCurrentView(ViewState.DASHBOARD)} />}
-                            {currentView === ViewState.GODOWNS && <GodownManager onBack={() => setCurrentView(ViewState.DASHBOARD)} />}
-                            {currentView === ViewState.BARCODE_LABELS && <BarcodeLabelGenerator onBack={() => setCurrentView(ViewState.INVENTORY)} />}
-                            {currentView === ViewState.ONLINE_STORE && <OnlineStoreManager key={company?.id} onBack={() => setCurrentView(ViewState.DASHBOARD)} />}
-                            {currentView === ViewState.PAYMENT_REMINDERS && <PaymentReminderCenter onBack={() => setCurrentView(ViewState.DASHBOARD)} />}
-                            {currentView === ViewState.AUTOMATED_BILLS && <AutomatedBills onBack={() => setCurrentView(ViewState.DASHBOARD)} />}
-                            {currentView === ViewState.COMPLIANCE_CENTER && <ComplianceCenter onBack={() => setCurrentView(ViewState.DASHBOARD)} />}
-                            {currentView === ViewState.ACCOUNTANT_EXPORT && <AccountantExport onBack={() => setCurrentView(ViewState.MORE_HUB)} />}
-                            {currentView === ViewState.CUSTOMER_ENGAGEMENT && <CustomerEngagement onBack={() => setCurrentView(ViewState.MORE_HUB)} />}
-                            {currentView === ViewState.STAFF_ROLES && <StaffAndRoles onBack={() => setCurrentView(ViewState.DASHBOARD)} onOpenAccountant={() => setCurrentView(ViewState.ACCOUNTANT_EXPORT)} />}
-                            {currentView === ViewState.RECYCLE_BIN && <RecycleBin onBack={() => setCurrentView(ViewState.DASHBOARD)} />}
+                            {currentView === ViewState.POS_BILLING && <POSBilling onBack={() => backToSource()} />}
+                            {currentView === ViewState.CASH_AND_BANK && <CashAndBank onBack={() => backToSource()} />}
+                            {currentView === ViewState.GODOWNS && <GodownManager onBack={() => backToSource()} />}
+                            {currentView === ViewState.BARCODE_LABELS && <BarcodeLabelGenerator onBack={() => backToSource(ViewState.INVENTORY)} />}
+                            {currentView === ViewState.ONLINE_STORE && <OnlineStoreManager key={company?.id} onBack={() => backToSource()} />}
+                            {currentView === ViewState.PAYMENT_REMINDERS && <PaymentReminderCenter onBack={() => backToSource()} />}
+                            {currentView === ViewState.AUTOMATED_BILLS && <AutomatedBills onBack={() => backToSource()} />}
+                            {currentView === ViewState.COMPLIANCE_CENTER && <ComplianceCenter onBack={() => backToSource()} />}
+                            {currentView === ViewState.ACCOUNTANT_EXPORT && <AccountantExport onBack={() => backToSource(ViewState.MORE_HUB)} />}
+                            {currentView === ViewState.CUSTOMER_ENGAGEMENT && <CustomerEngagement onBack={() => backToSource(ViewState.MORE_HUB)} />}
+                            {currentView === ViewState.STAFF_ROLES && <StaffAndRoles onBack={() => backToSource()} onOpenAccountant={() => setCurrentView(ViewState.ACCOUNTANT_EXPORT)} />}
+                            {currentView === ViewState.RECYCLE_BIN && <RecycleBin onBack={() => backToSource()} />}
                             {currentView === ViewState.MORE_HUB && (
-                                <MoreHub onNavigate={(view, voucherType) => {
+                                <MoreHub onBack={() => backToSource()} onNavigate={(view, voucherType) => {
                                     if (voucherType) setActiveVoucherType(voucherType);
                                     setCurrentView(view);
                                 }} />
@@ -589,7 +609,7 @@ const AccountingApp: React.FC = () => {
 
                             {currentView === ViewState.SMART_CALCULATOR && (
                                 <SmartCalculator
-                                    onBack={() => setCurrentView(ViewState.DASHBOARD)}
+                                    onBack={() => backToSource()}
                                     onSaveSuccess={() => {
                                         // Refresh invoice list and maybe go to view it?
                                         // For now just refresh global state if needed

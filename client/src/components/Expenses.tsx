@@ -1,8 +1,9 @@
+import { WorkspaceHeading, WorkspaceMetrics, WorkspaceFilters, workspace, workspaceMoney } from './WorkspaceUI';
 
 import React, { useState, useEffect } from 'react';
 import { Expense } from '../types';
 import { StorageService } from '../services/storageService';
-import { Plus, Trash2, Calendar, IndianRupee, Tag, ArrowLeft } from 'lucide-react';
+import { Plus, Trash2, Calendar, IndianRupee, Tag } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface ExpensesProps {
@@ -93,55 +94,13 @@ const Expenses: React.FC<ExpensesProps> = ({ onBack }) => {
     const totalItc = filteredExpenses.reduce((sum, e) => sum + (e.itcEligible ? (e.gstAmount || 0) : 0), 0);
 
     return (
-        <div className="pt-safe px-4 md:px-6 pb-24 md:pb-6 relative min-h-full">
-            <div className="flex justify-between items-center mb-6">
-                <div className="flex items-center gap-2">
-                    {onBack && (
-                        <button onClick={onBack} className="md:hidden p-2 -ml-2 text-slate-500">
-                            <ArrowLeft className="w-5 h-5" />
-                        </button>
-                    )}
-                    <div>
-                        <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Expenses</h2>
-                        <p className="text-sm text-slate-500">Track business costs</p>
-                    </div>
-                </div>
-                <button
-                    onClick={() => setShowAddModal(true)}
-                    className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors"
-                >
-                    <Plus className="w-4 h-4" />
-                    <span className="hidden md:inline">Add Expense</span>
-                </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
-                    <p className="text-slate-500 text-sm font-medium">Total Expenses</p>
-                    <h3 className="text-3xl font-bold text-red-600 mt-1">₹{totalExpenses.toFixed(2)}</h3>
-                </div>
-                <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
-                    <p className="text-slate-500 text-sm font-medium">Eligible GST ITC</p>
-                    <h3 className="text-3xl font-bold text-emerald-600 mt-1">₹{totalItc.toFixed(2)}</h3>
-                </div>
-            </div>
-
-            <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar">
-                {['ALL', ...EXPENSE_CATEGORIES].map(cat => (
-                    <button
-                        key={cat}
-                        type="button"
-                        onClick={() => setFilterCategory(cat)}
-                        className={`px-3.5 py-1.5 rounded-full text-xs font-bold border whitespace-nowrap ${
-                            filterCategory === cat
-                                ? 'bg-red-500 text-white border-red-500'
-                                : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                        }`}
-                    >
-                        {cat}
-                    </button>
-                ))}
-            </div>
+        <div className={workspace.page}>
+            <WorkspaceHeading title="Expenses" onBack={onBack} actions={<button type="button" onClick={() => setShowAddModal(true)} className={workspace.primary}><Plus size={17} /> Add Expense</button>} />
+            <WorkspaceMetrics values={[
+                { label: 'Total expenses', value: workspaceMoney(totalExpenses) },
+                { label: 'Eligible GST ITC', value: workspaceMoney(totalItc), tone: 'positive' },
+            ]} />
+            <WorkspaceFilters label="Expense category" value={filterCategory} onChange={setFilterCategory} options={[{ id: 'ALL', label: 'All categories' }, ...EXPENSE_CATEGORIES.map(category => ({ id: category, label: category }))]} />
 
             <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
                 {filteredExpenses.length > 0 ? (
@@ -165,7 +124,7 @@ const Expenses: React.FC<ExpensesProps> = ({ onBack }) => {
                                     <p className="font-bold text-slate-800 dark:text-slate-200">₹{expense.amount.toFixed(2)}</p>
                                     <button
                                         onClick={() => handleDelete(expense.id)}
-                                        className="p-2 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                        className="p-2 text-slate-400 hover:text-red-500 opacity-100 transition-opacity"
                                     >
                                         <Trash2 className="w-4 h-4" />
                                     </button>

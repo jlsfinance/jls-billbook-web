@@ -1,5 +1,6 @@
+import { WorkspaceHeading, workspace } from './WorkspaceUI';
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, ShieldCheck, Download, FileCode2, Truck } from 'lucide-react';
+import { Download, FileCode2, Truck } from 'lucide-react';
 import { CompanyProfile, Customer, Invoice, Product } from '../types';
 import { StorageService } from '../services/storageService';
 
@@ -256,25 +257,14 @@ export const ComplianceCenter: React.FC<ComplianceCenterProps> = ({ onBack }) =>
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-28">
-      <div className="sticky top-0 z-20 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {onBack && (
-            <button type="button" onClick={onBack} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-          )}
-          <div>
-            <h1 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-indigo-600" />
-              GST, E-Way Bill &amp; Tally Sync
-            </h1>
-            <p className="text-xs text-slate-500">Export NIC E-Invoice JSON, E-Way Bill JSON &amp; Tally XML</p>
-          </div>
-        </div>
+    <div className="min-h-screen bg-surface-container-low pb-28">
+      <div className={workspace.titleBand}>
+        <WorkspaceHeading title="GST, E-Way Bill & Tally Sync" onBack={onBack}>
+          Export e-invoice and e-way bill JSON or Tally XML.
+        </WorkspaceHeading>
       </div>
 
-      <div className="max-w-4xl mx-auto p-4 space-y-4">
+      <div className="mx-auto max-w-6xl px-4 pt-4 sm:px-6 space-y-4">
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 space-y-3">
           <h2 className="text-sm font-black uppercase tracking-wider text-slate-500 flex items-center gap-2">
             <Truck className="w-4 h-4 text-blue-600" /> E-Invoice (NIC v1.1) &amp; E-Way Bill JSON

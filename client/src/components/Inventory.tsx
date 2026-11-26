@@ -20,6 +20,7 @@ import { HapticService } from '../services/hapticService';
 import { WorkspaceFilters, WorkspaceHeading, WorkspaceMetrics, workspace, workspaceMoney } from './WorkspaceUI';
 
 interface InventoryProps {
+  onBack?: () => void;
   /** Opens the scan-first Stock In session owned by the parent shell. */
   onOpenStockIn?: () => void;
   onOpenBarcodeLabels?: () => void;
@@ -39,7 +40,7 @@ const emptyDraft = (): ProductDraft => ({
   barcodeEnabled: true,
 });
 
-const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabels }) => {
+const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabels, onBack }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -233,7 +234,7 @@ const Inventory: React.FC<InventoryProps> = ({ onOpenStockIn, onOpenBarcodeLabel
   return (
     <div className="min-h-[100dvh] bg-surface-container-low">
       <div className={workspace.page}>
-        <WorkspaceHeading title="Inventory" actions={<>
+        <WorkspaceHeading title="Inventory" onBack={onBack} actions={<>
           {onOpenBarcodeLabels && <button type="button" onClick={onOpenBarcodeLabels} className={workspace.secondary}><ScanLine size={16} /> Labels</button>}
           {onOpenStockIn && <button type="button" onClick={onOpenStockIn} className={workspace.secondary}>Stock in</button>}
           <button type="button" onClick={openCreate} className={workspace.primary}><Plus size={16} /> Add item</button>

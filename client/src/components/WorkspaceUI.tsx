@@ -1,3 +1,4 @@
+import { ArrowLeft } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 const moneyFormatter = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 });
@@ -5,19 +6,25 @@ export function workspaceMoney(amount: number) {
   return moneyFormatter.format(Number.isFinite(amount) ? amount : 0);
 }
 
+const pageFrame = 'mx-auto w-full max-w-6xl px-4 sm:px-6';
+
 export const workspace = {
-  page: 'mx-auto w-full max-w-6xl space-y-4 px-4 pb-24 pt-4 sm:space-y-5 sm:px-6 sm:pt-6',
+  page: pageFrame + ' space-y-4 pb-24 pt-4 sm:space-y-5 sm:pt-6',
+  titleBand: pageFrame + ' pt-4 sm:pt-6',
   primary: 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-3.5 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-50',
   secondary: 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-2 text-sm font-semibold text-foreground hover:bg-surface-container-high focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-50',
   panel: 'rounded-2xl border border-border bg-surface',
   input: 'min-h-11 min-w-0 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20',
 };
 
-export function WorkspaceHeading({ title, actions, children }: { title: string; actions?: ReactNode; children?: ReactNode }) {
+export function WorkspaceHeading({ title, actions, children, onBack }: { title: string; onBack?: () => void; actions?: ReactNode; children?: ReactNode }) {
   return <header className="flex flex-wrap items-start justify-between gap-x-5 gap-y-3">
-    <div className="flex-1 min-w-[9rem]">
-      <h1 className="font-heading text-2xl font-bold leading-tight tracking-tight text-foreground sm:text-3xl">{title}</h1>
-      {children && <div className="mt-1 text-sm text-muted-foreground">{children}</div>}
+    <div className="flex min-w-[10rem] flex-1 items-center gap-2.5">
+      {onBack && <button type="button" aria-label="Back" onClick={onBack} className={workspace.secondary + ' w-11 shrink-0 !px-0'}><ArrowLeft size={19} /></button>}
+      <div className="min-w-0">
+        <h1 className="font-heading text-2xl font-bold leading-tight tracking-tight text-foreground sm:text-3xl">{title}</h1>
+        {children && <div className="mt-1 text-sm text-muted-foreground">{children}</div>}
+      </div>
     </div>
     {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
   </header>;

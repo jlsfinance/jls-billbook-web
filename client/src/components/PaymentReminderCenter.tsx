@@ -1,5 +1,6 @@
+import { WorkspaceHeading, workspace } from './WorkspaceUI';
 import React, { useMemo } from 'react';
-import { ArrowLeft, BellRing, MessageCircle, Clock } from 'lucide-react';
+import { MessageCircle, Clock } from 'lucide-react';
 import { StorageService } from '../services/storageService';
 import { WhatsAppService } from '../services/whatsappService';
 
@@ -30,28 +31,18 @@ export const PaymentReminderCenter: React.FC<PaymentReminderCenterProps> = ({ on
   const totalDue = receivables.reduce((s, r) => s + r.customer.balance, 0);
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-28">
-      <div className="sticky top-0 z-20 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {onBack && (
-            <button type="button" onClick={onBack} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-          )}
-          <div>
-            <h1 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <BellRing className="w-5 h-5 text-emerald-600" />
-              Payment Reminders (Udhaar Recovery)
-            </h1>
-            <p className="text-xs text-slate-500">Send 1-tap WhatsApp &amp; UPI payment reminders</p>
-          </div>
-        </div>
-        <span className="px-3 py-1 rounded-full bg-rose-100 text-rose-700 text-xs font-black">
+    <div className="min-h-screen bg-surface-container-low pb-28">
+      <div className={workspace.titleBand}>
+        <WorkspaceHeading title="Payment Reminders" onBack={onBack} actions={
+          <span className={workspace.primary}>
           Total Due: ₹{totalDue.toLocaleString('en-IN')}
         </span>
+        }>
+          Send a WhatsApp reminder with UPI payment details.
+        </WorkspaceHeading>
       </div>
 
-      <div className="max-w-4xl mx-auto p-4 space-y-3">
+      <div className="mx-auto max-w-6xl px-4 pt-4 sm:px-6 space-y-3">
         {receivables.length === 0 ? (
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-12 text-center text-slate-400">
             All parties settled! Zero overdue receivables.

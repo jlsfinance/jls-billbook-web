@@ -8,6 +8,7 @@ import { Share } from '@capacitor/share';
 import { StorageService } from '../services/storageService';
 import { inReportRange, localDay } from '../services/businessReports';
 import { formatDate } from '../utils/dateUtils';
+import { readDaybook, type DaybookEntry as Entry } from '../services/daybook';
 import type { Invoice } from '../types';
 import { WorkspaceFilters, WorkspaceHeading, WorkspaceMetrics, workspace, workspaceMoney } from './WorkspaceUI';
 
@@ -16,41 +17,9 @@ const filters = [
     { id: 'received', label: 'Money in' }, { id: 'paid', label: 'Money out' }, { id: 'expense', label: 'Expenses' },
 ] as const;
 type Filter = typeof filters[number]['id'];
-type Entry = {
-    id: string; date: string; label: string; type: Exclude<Filter, 'all'>; name: string;
-    reference: string; amount: number; partyId?: string; invoice?: Invoice;
-};
 
-function readDaybook(): Entry[] {
-    const parties = new Map(StorageService.getCustomers().map(party => [party.id, party.company || party.name]));
-    const voucherRow = (invoice: Invoice, type: 'sale' | 'purchase', label: string, sign = 1): Entry => ({
-        id: `${type}:${invoice.id}`, date: invoice.date, type, label, name: invoice.customerName || 'Walk-in',
-        reference: invoice.invoiceNumber, amount: sign * Math.abs(Number(invoice.total) || 0), partyId: invoice.customerId, invoice,
-    });
-    const vouchers = [
-        ...StorageService.getInvoices().map(invoice => invoice.type === 'CREDIT_NOTE'
-            ? voucherRow(invoice, 'sale', 'Sales return', -1) : voucherRow(invoice, 'sale', 'Sale')),
-        ...StorageService.getPurchases().map(invoice => voucherRow(invoice, 'purchase', 'Purchase')),
-        ...StorageService.getVouchersByType('DEBIT_NOTE').map(invoice => voucherRow(invoice, 'purchase', 'Purchase return', -1)),
-    ].filter(row => row.invoice?.conversionStatus !== 'CANCELLED');
-    const payments = StorageService.getPayments().map((payment): Entry => {
-        const outgoing = payment.type === 'PAID';
-        const status = payment.mode === 'CHEQUE' && payment.chequeStatus && payment.chequeStatus !== 'CLEARED'
-            ? ` · Cheque ${payment.chequeStatus.toLowerCase()}` : '';
-        return { id: `payment:${payment.id}`, date: payment.date, type: outgoing ? 'paid' : 'received',
-            label: (outgoing ? 'Payment out' : 'Payment in') + status, name: parties.get(payment.customerId) || 'Walk-in',
-            reference: payment.reference || payment.invoiceNumber || payment.mode.replace(/_/g, ' '),
-            amount: Number(payment.amount) || 0, partyId: payment.customerId };
-    });
-    const expenses = StorageService.getExpenses().map((expense): Entry => ({
-        id: `expense:${expense.id}`, date: expense.date, label: 'Expense', type: 'expense',
-        name: expense.description || expense.category, reference: expense.invoiceRef || expense.category, amount: Number(expense.amount) || 0,
-    }));
-    return [...vouchers, ...payments, ...expenses].sort((a, b) => b.date.localeCompare(a.date));
-}
-
-export default function Daybook({ initialDate, onViewCustomerLedger, onViewInvoice }: {
-    initialDate?: string | null; onViewCustomerLedger?: (customerId: string) => void; onViewInvoice?: (invoice: Invoice) => void;
+export default function Daybook({ initialDate, onViewCustomerLedger, onViewInvoice, onBack }: {
+    initialDate?: string | null; onBack?: () => void; onViewCustomerLedger?: (customerId: string) => void; onViewInvoice?: (invoice: Invoice) => void;
 }) {
     const [from, setFrom] = useState(() => initialDate || localDay());
     const [to, setTo] = useState(() => initialDate || localDay());
@@ -104,7 +73,7 @@ export default function Daybook({ initialDate, onViewCustomerLedger, onViewInvoi
     }
 
     return <div className={workspace.page}>
-        <WorkspaceHeading title="Daybook" actions={<button type="button" disabled={!visible.length} onClick={downloadPDF} className={workspace.secondary}><Download size={16} /> PDF</button>}>
+        <WorkspaceHeading title="Daybook" onBack={onBack} actions={<button type="button" disabled={!visible.length} onClick={downloadPDF} className={workspace.secondary}><Download size={16} /> PDF</button>}>
             Sales, purchases, payments and expenses for the selected period.
         </WorkspaceHeading>
         {exportError && <p role="alert" className="text-sm text-red-700 dark:text-red-300">Could not export the Daybook PDF.</p>}

@@ -20,6 +20,7 @@ const IS_LOW_END = isLowEndDevice();
 const PAGE_SIZE = IS_LOW_END ? 15 : 30;
 
 interface AllInvoicesProps {
+  onBack?: () => void;
   invoices?: Invoice[];
   title?: string;
   createLabel?: string;
@@ -97,6 +98,7 @@ const AllInvoices: React.FC<AllInvoicesProps> = ({
   onDelete,
   onViewLedger,
   onCreate,
+  onBack,
   onConverted
 }) => {
   const [docFilter, setDocFilter] = useState<VoucherType | 'ALL'>(initialDocFilter);
@@ -190,7 +192,7 @@ const AllInvoices: React.FC<AllInvoicesProps> = ({
   return (
     <div className="min-h-screen bg-surface-container-low">
       <div className={workspace.page}>
-        <WorkspaceHeading title={title} actions={<>
+        <WorkspaceHeading title={title} onBack={onBack} actions={<>
           {onCreate && <button type="button" onClick={onCreate} className={workspace.primary}><Plus size={16} /> {createLabel}</button>}
           <button type="button" aria-label="Smart Calculator help" onClick={() => setShowHelp(true)} className={workspace.secondary}><BookOpen size={16} /></button>
         </>} />

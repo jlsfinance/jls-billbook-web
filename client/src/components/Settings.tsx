@@ -1,3 +1,4 @@
+import { WorkspaceHeading, workspace } from './WorkspaceUI';
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { CompanyProfile, InvoiceFormat } from '../types';
@@ -18,7 +19,7 @@ import { AdminAdsManager, ANNOUNCEMENTS_PANEL } from './AdminAdsManager';
 import { Dialog, DialogTrigger } from './ui/dialog';
 import { useSearch } from '@/contexts/SearchContext';
 
-const Settings: React.FC = () => {
+const Settings: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const { company, saveCompany } = useCompany();
   const { user, deleteAccount } = useAuth();
   const { clearSearch } = useSearch();
@@ -224,17 +225,15 @@ const Settings: React.FC = () => {
 
   return (
     <Dialog open={showAdminAds} onOpenChange={setShowAdminAds}>
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-24">
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl px-4 pt-safe pb-4 border-b border-slate-200 dark:border-slate-800">
-        <h1 className="text-xl font-black text-slate-800 dark:text-white">Settings</h1>
-        <p className="text-xs text-slate-500 mt-1">Manage your business preferences</p>
+    <div className="min-h-screen bg-surface-container-low pb-24">
+      <div className={workspace.titleBand}>
+        <WorkspaceHeading title="Settings" onBack={onBack}>Business profile, billing and account preferences</WorkspaceHeading>
       </div>
 
-      <div className="max-w-2xl mx-auto p-4 space-y-6">
+      <div className="mx-auto max-w-6xl space-y-5 px-4 pt-4 sm:px-6">
 
         {/* Profile Card */}
-        <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-3xl p-6 text-white shadow-lg">
+        <div className="rounded-2xl bg-[#123377] p-4 text-white sm:p-6">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center text-2xl font-black">
               {(user?.displayName || user?.email || 'U').charAt(0).toUpperCase()}
@@ -249,11 +248,11 @@ const Settings: React.FC = () => {
 
 
         {/* Business Announcements (Available to all Business Owners) */}
-        <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-3xl p-1 shadow-lg overflow-hidden relative">
+        <div className="rounded-2xl border border-border bg-surface overflow-hidden relative">
           <DialogTrigger asChild>
-            <button type="button" className="w-full p-4 flex items-center justify-between text-white relative z-10">
+            <button type="button" className="w-full p-4 flex items-center justify-between text-foreground relative z-10 hover:bg-accent">
               <div className="flex items-center gap-3">
-                <div className="p-3 bg-white/10 rounded-xl"><Shield className="w-6 h-6 text-yellow-400" /></div>
+                <div className="p-2.5 bg-primary/10 rounded-xl"><Shield className="w-5 h-5 text-primary" /></div>
                 <div className="text-left">
                   <div className="font-bold">Business Announcements</div>
                   <div className="text-xs opacity-60">Create Banners & Updates</div>

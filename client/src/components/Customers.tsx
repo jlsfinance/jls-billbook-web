@@ -19,6 +19,7 @@ import { formatDate } from '../utils/dateUtils';
 import { WorkspaceFilters, WorkspaceHeading, WorkspaceMetrics, workspace, workspaceMoney } from './WorkspaceUI';
 
 interface CustomersProps {
+  onBackToWorkspace?: () => void;
   onEditInvoice?: (invoice: Invoice) => void;
   onBack?: () => void;
   initialCustomerId?: string;
@@ -35,7 +36,7 @@ interface Transaction {
   data: Invoice | Payment;
 }
 
-const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, initialCustomerId }) => {
+const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, onBackToWorkspace, initialCustomerId }) => {
   const [customers, setCustomers] = useState<Customer[]>([]);
 
   // Use a function to initialize state so it runs only once
@@ -1317,7 +1318,7 @@ const Customers: React.FC<CustomersProps> = ({ onEditInvoice, onBack, initialCus
       </AnimatePresence>
 
       <div className={workspace.page}>
-        <WorkspaceHeading title="Parties" actions={<>
+        <WorkspaceHeading title="Parties" onBack={onBackToWorkspace} actions={<>
           {onBack && <button type="button" aria-label="Back" onClick={onBack} className={workspace.secondary}><ArrowLeft size={16} /></button>}
           <button type="button" onClick={() => setShowAddCustomer(true)} className={workspace.primary}><Plus size={16} /> Add party</button>
         </>}>{customers.length} {customers.length === 1 ? 'party' : 'parties'}</WorkspaceHeading>

@@ -1,5 +1,6 @@
+import { WorkspaceHeading, workspace } from './WorkspaceUI';
 import React, { useState } from 'react';
-import { ArrowLeft, Warehouse, Plus, ArrowLeftRight } from 'lucide-react';
+import { Plus, ArrowLeftRight } from 'lucide-react';
 import { Godown, GodownTransfer, Product } from '../types';
 import { StorageService } from '../services/storageService';
 import { formatDate } from '../utils/dateUtils';
@@ -60,33 +61,23 @@ export const GodownManager: React.FC<GodownManagerProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-28">
-      <div className="sticky top-0 z-20 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {onBack && (
-            <button type="button" onClick={onBack} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-          )}
-          <div>
-            <h1 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <Warehouse className="w-5 h-5 text-indigo-600" />
-              Godowns &amp; Warehouses
-            </h1>
-            <p className="text-xs text-slate-500">Multi-location stock control &amp; inter-godown transfer</p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <button type="button" onClick={() => setShowTransfer(true)} className="px-3.5 py-2 rounded-full bg-slate-100 dark:bg-slate-800 text-xs font-bold flex items-center gap-1">
+    <div className="min-h-screen bg-surface-container-low pb-28">
+      <div className={workspace.titleBand}>
+        <WorkspaceHeading title="Godowns & Warehouses" onBack={onBack} actions={
+          <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setShowTransfer(true)} className={workspace.secondary}>
             <ArrowLeftRight className="w-4 h-4 text-indigo-600" /> Transfer
           </button>
-          <button type="button" onClick={() => setShowAdd(true)} className="px-3.5 py-2 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center gap-1">
+          <button type="button" onClick={() => setShowAdd(true)} className={workspace.primary}>
             <Plus className="w-4 h-4" /> Add Godown
           </button>
         </div>
+        }>
+          See stock by location and transfer between godowns.
+        </WorkspaceHeading>
       </div>
 
-      <div className="max-w-5xl mx-auto p-4 space-y-5">
+      <div className="mx-auto max-w-6xl px-4 pt-4 sm:px-6 space-y-5">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {godowns.map((g) => {
             const totalQty = products.reduce((s, p) => s + Number(p.godownStocks?.[g.id] ?? (g.isMain ? p.stock : 0)), 0);
