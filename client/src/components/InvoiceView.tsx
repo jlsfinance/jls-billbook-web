@@ -14,6 +14,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ContactService } from '../services/contactService';
 import ContactPermissionModal from './ContactPermissionModal';
 import { formatDate } from '../utils/dateUtils';
+import { WhatsAppService } from '../services/whatsappService';
+import CompactBill from './CompactBill';
 
 interface InvoiceViewProps {
   invoice: Invoice;
@@ -29,6 +31,8 @@ interface InvoiceViewProps {
 
 
 
+const billAction = 'grid h-8 w-8 shrink-0 place-items-center rounded-full border border-border/30 bg-surface-container-high hover:bg-surface-container-highest focus-visible:ring-2 focus-visible:ring-primary/50 min-[360px]:h-9 min-[360px]:w-9 sm:h-11 sm:w-11';
+
 const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDelete, onConverted, showPostSaveActions = false,
   onClosePostSaveActions,
   isPublicView = false
@@ -41,6 +45,9 @@ const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDe
 
   // Toggles
   const [showOptions, setShowOptions] = useState(false);
+  const [showBillDetails, setShowBillDetails] = useState(false);
+  const [shareNotice, setShareNotice] = useState('');
+  const billLabel = ({ QUOTATION: 'Quotation', PROFORMA: 'Proforma', DELIVERY_CHALLAN: 'Delivery challan', CREDIT_NOTE: 'Credit note', DEBIT_NOTE: 'Debit note', PURCHASE_ORDER: 'Purchase order', PURCHASE: 'Purchase', SALE: 'Bill' } as const)[invoice.type || 'SALE'];
   const isPosView = invoice.customerName?.toUpperCase() === 'CASH' || invoice.customerName?.toUpperCase() === 'CASH SALES';
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
 
@@ -58,6 +65,7 @@ const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDe
 
   useEffect(() => {
     let companyData: CompanyProfile;
+    const stored = StorageService.getCompanyProfile();
 
     if (firebaseCompany?.name) {
       companyData = {
@@ -70,11 +78,10 @@ const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDe
         gstin: (firebaseCompany as any).gstin || (firebaseCompany as any).gst || '',
         gst_enabled: firebaseCompany.gst_enabled ?? true,
         show_hsn_summary: firebaseCompany.show_hsn_summary ?? true,
-        upiId: (firebaseCompany as any).upiId || company?.upiId || '',
+        upiId: (firebaseCompany.upiId || (isPublicView ? '' : stored.upiId) || '').trim(),
         invoiceSettings: (firebaseCompany as any).invoiceSettings
       };
     } else {
-      const stored = StorageService.getCompanyProfile();
       companyData = {
         ...stored,
         gstin: stored.gstin || stored.gst || '',
@@ -84,34 +91,31 @@ const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDe
     }
     setCompany(companyData);
 
-    // Get Customer Details
-    const cust = StorageService.getCustomers().find(c => c.id === invoice.customerId);
-    if (cust) {
-      setCustomer(cust);
-      setWaPhone(cust.phone || '');
-      setWaName(cust.company || cust.name || '');
+    const customer = StorageService.getCustomers().find(party => party.id === invoice.customerId);
+    setCustomer(customer ?? null);
+    setWaPhone(customer?.phone || '');
+    setWaName(customer?.company || customer?.name || invoice.customerName || '');
+    const storedBalance = Number(invoice.previousBalance) || 0;
+    const currentBillDue = invoice.status === 'PENDING' || invoice.status === 'PARTIAL' ? invoice.total : 0;
+    setPrevBalance(storedBalance > 0 ? storedBalance : customer ? (customer.balance || 0) - currentBillDue : 0);
+    setShowPrevBalance(storedBalance > 0);
 
-      // Calculate Previous Balance
-      const currentDue = cust.balance || 0;
-      // If invoice reflects a stored previous balance, use it
-      if (invoice.previousBalance !== undefined && invoice.previousBalance > 0) {
-        setPrevBalance(invoice.previousBalance);
-        setShowPrevBalance(true);
-      } else {
-        // If invoice is unpaid, subtract its amount to get 'previous' balance
-        const invAmountInBalance = (invoice.status === 'PENDING' || invoice.status === 'PARTIAL') ? invoice.total : 0;
-        setPrevBalance(currentDue - invAmountInBalance);
-      }
-    }
-
-    // Generate QR Code
+    let active = true;
+    setQrCodeUrl('');
     if (companyData.upiId) {
-      const upiUrl = `upi://pay?pa=${companyData.upiId}&pn=${encodeURIComponent(companyData.name)}&am=${invoice.total}&cu=INR&tn=${encodeURIComponent(`Inv-${invoice.invoiceNumber}`)}`;
-      QRCode.toDataURL(upiUrl)
-        .then(url => setQrCodeUrl(url))
-        .catch(err => console.error(err));
+      const params = new URLSearchParams({
+        pa: companyData.upiId,
+        pn: companyData.name,
+        am: String(invoice.total),
+        cu: 'INR',
+        tn: 'Inv-' + invoice.invoiceNumber,
+      });
+      void QRCode.toDataURL('upi://pay?' + params.toString().replace(/\+/g, '%20'))
+        .then(url => { if (active) setQrCodeUrl(url); })
+        .catch(error => console.error('Could not generate payment QR', error));
     }
-  }, [invoice, firebaseCompany]);
+    return () => { active = false; };
+  }, [invoice, firebaseCompany, isPublicView]);
 
   useEffect(() => {
     if (showPostSaveActions) {
@@ -172,6 +176,7 @@ const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDe
       `Thank you!\n` +
       `*${company.name}*`;
 
+    if (invoice.publicToken) message += '\n\n' + WhatsAppService.buildPublicBillUrl(invoice);
     const url = `https://wa.me/91${phone}?text=${encodeURIComponent(message)}`;
 
     if (Capacitor.isNativePlatform()) {
@@ -189,6 +194,30 @@ const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDe
     await InvoicePdfService.generatePDF(invoice, company, customer, qrCodeUrl, showPrevBalance);
   };
 
+  const shareBill = async () => {
+    setShareNotice('');
+    const url = invoice.publicToken ? WhatsAppService.buildPublicBillUrl(invoice) : undefined;
+    const title = billLabel + ' ' + invoice.invoiceNumber;
+    try {
+      if (url && navigator.share) {
+        await navigator.share({ title, url });
+      } else if (url && navigator.clipboard) {
+        await navigator.clipboard.writeText(url);
+        setShareNotice('Bill link copied.');
+      } else {
+        setShowWhatsAppPhoneModal(true);
+      }
+    } catch (error) {
+      if (!(error instanceof Error && error.name === 'AbortError')) setShowWhatsAppPhoneModal(true);
+    }
+  };
+
+  const convertBill = () => {
+    const converted = StorageService.convertVoucher(invoice.id, invoice.type === 'PURCHASE_ORDER' ? 'PURCHASE' : 'SALE');
+    setShowOptions(false);
+    if (converted) onConverted?.(converted);
+  };
+
   const handleDelete = () => {
     if (onDelete) {
       onDelete(invoice);
@@ -199,7 +228,7 @@ const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDe
   };
 
   return (
-    <div className="min-h-screen bg-surface-container-low pb-32">
+    <div className="min-h-screen bg-surface-container-low pb-24 dark:bg-[#0e0f13]">
       {/* Custom Print Style */}
       {/* Custom Print Style - Safe Implementation */}
       <style>
@@ -213,6 +242,38 @@ const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDe
         `}
       </style>
 
+      {!isPublicView ? <>
+        <header className="sticky top-0 z-[100] border-b border-border bg-surface-container-low/95 backdrop-blur no-print dark:bg-[#0b0c10]/95">
+          <div className="mx-auto flex min-h-[4.5rem] max-w-3xl items-center gap-1.5 px-2 sm:min-h-20 sm:gap-2.5 sm:px-4">
+            <button type="button" aria-label="Back" onClick={onBack} className={billAction}><ArrowLeft size={19} /></button>
+            <div className="min-w-0 flex-1 pl-0.5 sm:pl-1.5">
+              <h1 className="font-heading text-sm font-black leading-tight min-[360px]:text-base sm:text-xl">{invoice.type && invoice.type !== 'SALE' ? billLabel : 'View Bill'}</h1>
+              {!!invoice.status && <p className="mt-1 flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-wider text-muted-foreground sm:text-[10px]">
+                <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${invoice.status === 'PAID' ? 'bg-emerald-500' : invoice.status === 'OVERDUE' ? 'bg-red-500' : 'bg-orange-400'}`} />
+                <span className="truncate">{invoice.status}</span>
+              </p>}
+            </div>
+            <div className="flex shrink-0 items-center gap-1 min-[375px]:gap-1.5 sm:gap-2">
+              <button type="button" aria-label="WhatsApp" onClick={() => setShowWhatsAppPhoneModal(true)} className={billAction + ' text-emerald-600 dark:text-emerald-400'}><MessageCircle size={19} /></button>
+              <button type="button" aria-label="Download PDF" onClick={handleDownload} className={billAction}><Download size={19} /></button>
+              <button type="button" aria-label="Share bill" onClick={shareBill} className={billAction + ' !border-primary/25 !bg-primary/10 text-primary dark:text-blue-400'}><Share2 size={19} /></button>
+              <button type="button" aria-label="Edit bill" onClick={() => onEdit(invoice)} className={billAction}><Edit size={19} /></button>
+              <button type="button" aria-label="More bill actions" aria-expanded={showOptions} onClick={() => setShowOptions(!showOptions)} className={billAction}><MoreVertical size={19} /></button>
+            </div>
+          </div>
+        </header>
+
+        {shareNotice && <p role="status" className="mx-auto max-w-3xl px-4 pt-2 text-xs font-semibold text-primary no-print">{shareNotice}</p>}
+        {invoice.conversionStatus !== 'CONVERTED' && ['QUOTATION', 'PROFORMA', 'DELIVERY_CHALLAN', 'PURCHASE_ORDER'].includes(invoice.type || '') && (
+          <div className="mx-auto flex max-w-3xl justify-end px-3 pt-2 no-print">
+            <button type="button" onClick={convertBill} className="flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-700 px-3 text-xs font-semibold text-white">
+              <ArrowRightLeft size={15} /> {invoice.type === 'PURCHASE_ORDER' ? 'Convert to Purchase' : 'Convert to Invoice'}
+            </button>
+          </div>
+        )}
+        <CompactBill invoice={invoice} company={company} label={billLabel} qrCodeUrl={qrCodeUrl}
+          previousBalance={showPrevBalance ? prevBalance : null} showDetails={showBillDetails} />
+      </> : <>
       {/* Header */}
       <div className="sticky top-0 z-[100] bg-surface-container-low/80 backdrop-blur-md px-6 py-6 border-b border-border flex items-center justify-between no-print">
         <div className="flex items-center gap-4">
@@ -261,42 +322,11 @@ const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDe
           >
             <Download className="w-5 h-5" />
           </motion.button>
-
-          {!isPublicView && (
-            <motion.button
-              whileTap={{ scale: 0.9 }}
-              onClick={() => setShowOptions(!showOptions)}
-              className="w-12 h-12 rounded-full bg-surface-container-high flex items-center justify-center text-foreground"
-            >
-              <MoreVertical className="w-5 h-5" />
-            </motion.button>
-          )}
         </div>
       </div>
 
       {/* Main Content */}
       <div id="printable-area" className="max-w-4xl mx-auto p-4 md:p-10">
-        {!isPublicView && invoice.conversionStatus !== 'CONVERTED' && ['QUOTATION', 'PROFORMA', 'DELIVERY_CHALLAN', 'PURCHASE_ORDER'].includes(invoice.type || '') && (
-          <div className="mb-4 p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between gap-3 no-print">
-            <div>
-              <p className="text-xs font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
-                {(invoice.type || '').replace('_', ' ')} Ready
-              </p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">Convert this document directly without re-entering items</p>
-            </div>
-            <button
-              onClick={() => {
-                const targetType = invoice.type === 'PURCHASE_ORDER' ? 'PURCHASE' : 'SALE';
-                const converted = StorageService.convertVoucher(invoice.id, targetType);
-                if (converted && onConverted) onConverted(converted);
-              }}
-              className="px-4 py-2 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm shrink-0"
-            >
-              <ArrowRightLeft className="w-3.5 h-3.5" />
-              {invoice.type === 'PURCHASE_ORDER' ? 'Convert to Purchase' : 'Convert to Invoice'}
-            </button>
-          </div>
-        )}
         <div className={`bg-surface ${isPosView ? 'rounded-[12px]' : 'rounded-[40px] shadow-google'} border border-border overflow-hidden`}>
 
           {/* M3 Bill Header */}
@@ -494,6 +524,8 @@ const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDe
         </div>
       </div>
 
+      </>}
+
       {/* Options Menu */}
       <AnimatePresence>
         {showOptions && (
@@ -509,10 +541,10 @@ const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDe
               initial={{ y: 100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 100, opacity: 0 }}
-              className="relative w-full max-w-sm bg-surface rounded-[40px] overflow-hidden"
+              className="relative w-full max-w-sm bg-surface rounded-3xl max-h-[80dvh] overflow-y-auto"
             >
-              <div className="p-8 space-y-2">
-                <button onClick={() => { setShowPrevBalance(!showPrevBalance); setShowOptions(false); }} className="w-full p-6 text-left hover:bg-surface-container-high rounded-[32px] flex items-center gap-4 transition-colors">
+              <div className="p-3 space-y-1">
+                <button onClick={() => { setShowPrevBalance(!showPrevBalance); setShowOptions(false); }} className="w-full p-3 text-left hover:bg-surface-container-high rounded-[32px] flex items-center gap-4 transition-colors">
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center ${showPrevBalance ? 'bg-google-green text-white' : 'bg-surface-container-highest text-foreground'}`}>
                     <span className="text-lg font-black">₹</span>
                   </div>
@@ -538,27 +570,22 @@ const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDe
                   const custInvoices = StorageService.getInvoices().filter(i => i.customerId === targetCust.id);
                   const custPayments = StorageService.getPayments().filter(p => p.customerId === targetCust.id);
                   LedgerPdfService.generateLedgerPDF(targetCust, company, custInvoices, custPayments, fromDate, toDate);
-                }} className="w-full p-6 text-left hover:bg-surface-container-high rounded-[32px] flex items-center gap-4 transition-colors">
+                }} className="w-full p-3 text-left hover:bg-surface-container-high rounded-[32px] flex items-center gap-4 transition-colors">
                   <div className="w-10 h-10 rounded-full bg-surface-container-highest text-foreground flex items-center justify-center">
                     <FileText className="w-5 h-5" />
                   </div>
                   <span className="font-black text-foreground">Export FY Ledger (PDF)</span>
                 </button>
 
-                <button onClick={() => { setShowOptions(false); setShowThermalModal(true); }} className="w-full p-6 text-left hover:bg-surface-container-high rounded-[32px] flex items-center gap-4 transition-colors">
+                <button onClick={() => { setShowOptions(false); setShowThermalModal(true); }} className="w-full p-3 text-left hover:bg-surface-container-high rounded-[32px] flex items-center gap-4 transition-colors">
                   <div className="w-10 h-10 rounded-full bg-google-blue/10 text-google-blue flex items-center justify-center">
                     <Printer className="w-5 h-5" />
                   </div>
                   <span className="font-black text-foreground">Thermal Print (2" / 3")</span>
                 </button>
 
-                {!isPublicView && invoice.conversionStatus !== 'CONVERTED' && ['QUOTATION', 'PROFORMA', 'DELIVERY_CHALLAN', 'PURCHASE_ORDER'].includes(invoice.type || '') && (
-                  <button onClick={() => {
-                    const targetType = invoice.type === 'PURCHASE_ORDER' ? 'PURCHASE' : 'SALE';
-                    const converted = StorageService.convertVoucher(invoice.id, targetType);
-                    setShowOptions(false);
-                    if (converted && onConverted) onConverted(converted);
-                  }} className="w-full p-6 text-left hover:bg-emerald-500/10 rounded-[32px] flex items-center gap-4 transition-colors">
+                {invoice.conversionStatus !== 'CONVERTED' && ['QUOTATION', 'PROFORMA', 'DELIVERY_CHALLAN', 'PURCHASE_ORDER'].includes(invoice.type || '') && (
+                  <button onClick={convertBill} className="w-full p-3 text-left hover:bg-emerald-500/10 rounded-[32px] flex items-center gap-4 transition-colors">
                     <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
                       <ArrowRightLeft className="w-5 h-5" />
                     </div>
@@ -568,32 +595,12 @@ const InvoiceView: React.FC<InvoiceViewProps> = ({ invoice, onBack, onEdit, onDe
                   </button>
                 )}
 
-                <button onClick={() => {
-                  setShowOptions(false);
-                  if (navigator.share) {
-                    navigator.share({
-                      title: `Invoice ${invoice.invoiceNumber}`,
-                      text: `Details for Invoice ${invoice.invoiceNumber}`,
-                      url: window.location.href
-                    }).catch(console.error);
-                  } else {
-                    setShowWhatsAppPhoneModal(true);
-                  }
-                }} className="w-full p-6 text-left hover:bg-surface-container-high rounded-[32px] flex items-center gap-4 transition-colors">
-                  <div className="w-10 h-10 rounded-full bg-surface-container-highest text-foreground flex items-center justify-center">
-                    <Share2 className="w-5 h-5" />
-                  </div>
-                  <span className="font-black text-foreground">Share</span>
+                <button type="button" onClick={() => { setShowBillDetails(!showBillDetails); setShowOptions(false); }} className="w-full p-3 text-left hover:bg-surface-container-high rounded-[32px] flex items-center gap-4 transition-colors">
+                  <div className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center"><FileText size={18} /></div>
+                  <span className="font-black">{showBillDetails ? 'Hide bill details' : 'Show bill details'}</span>
                 </button>
 
-                <button onClick={() => { onEdit(invoice); setShowOptions(false); }} className="w-full p-6 text-left hover:bg-surface-container-high rounded-[32px] flex items-center gap-4 transition-colors">
-                  <div className="w-10 h-10 rounded-full bg-google-blue/10 text-google-blue flex items-center justify-center">
-                    <Edit className="w-5 h-5" />
-                  </div>
-                  <span className="font-black text-foreground">Edit Invoice</span>
-                </button>
-
-                <button onClick={() => setShowDeleteConfirm(true)} className="w-full p-6 text-left hover:bg-google-red/10 rounded-[32px] flex items-center gap-4 transition-colors group">
+                <button onClick={() => setShowDeleteConfirm(true)} className="w-full p-3 text-left hover:bg-google-red/10 rounded-[32px] flex items-center gap-4 transition-colors group">
                   <div className="w-10 h-10 rounded-full bg-google-red/10 text-google-red flex items-center justify-center">
                     <Trash2 className="w-5 h-5" />
                   </div>
