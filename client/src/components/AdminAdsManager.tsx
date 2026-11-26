@@ -3,15 +3,15 @@ import React, { useState, useEffect } from 'react';
 import { StorageService } from '../services/storageService';
 import { GeminiService } from '../services/geminiService';
 import { AdminAd } from '../types';
-import { Trash2, Sparkles, Wand2, X } from 'lucide-react';
+import { Content } from '@radix-ui/react-dialog';
+import { ArrowLeft, Trash2, Sparkles, Wand2 } from 'lucide-react';
 import { HapticService } from '../services/hapticService';
 import { AIService } from '../services/aiService';
+import { DialogClose, DialogDescription, DialogPortal, DialogTitle } from './ui/dialog';
 
-interface AdminAdsManagerProps {
-    onClose: () => void;
-}
+export const ANNOUNCEMENTS_PANEL = 'business-announcements';
 
-export const AdminAdsManager: React.FC<AdminAdsManagerProps> = ({ onClose }) => {
+export const AdminAdsManager: React.FC = () => {
     const [ads, setAds] = useState<AdminAd[]>([]);
     const [aiPrompt, setAiPrompt] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
@@ -62,13 +62,17 @@ export const AdminAdsManager: React.FC<AdminAdsManagerProps> = ({ onClose }) => 
     };
 
     return (
-        <div className="fixed inset-0 z-50 bg-slate-100 dark:bg-slate-900 flex flex-col">
-            <div className="p-4 bg-white dark:bg-slate-800 shadow-sm flex items-center justify-between">
-                <h2 className="text-xl font-black text-slate-800 dark:text-white">Update Manager</h2>
-                <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100"><X /></button>
-            </div>
+        <DialogPortal>
+          <Content className="fixed inset-0 z-[250] flex h-[100dvh] flex-col bg-slate-100 pt-safe-top dark:bg-slate-900">
+            <header className="flex shrink-0 items-center gap-3 bg-white px-4 py-2 shadow-sm dark:bg-slate-800">
+                <DialogClose type="button" className="-ml-2 inline-flex min-h-11 shrink-0 items-center gap-1 rounded-xl px-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 dark:text-slate-200 dark:hover:bg-slate-700">
+                    <ArrowLeft className="h-5 w-5" aria-hidden="true" /> Back
+                </DialogClose>
+                <DialogTitle className="text-xl font-black text-slate-800 dark:text-white">Update Manager</DialogTitle>
+                <DialogDescription className="sr-only">Create and manage business announcements.</DialogDescription>
+            </header>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                 {/* AI Generator Section */}
                 <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-3xl p-6 text-white shadow-lg">
                     <div className="flex items-center gap-2 mb-2">
@@ -80,10 +84,11 @@ export const AdminAdsManager: React.FC<AdminAdsManagerProps> = ({ onClose }) => 
                     <div className="flex gap-2">
                         <input
                             type="text"
+                            aria-label="Update topic"
                             value={aiPrompt}
                             onChange={e => setAiPrompt(e.target.value)}
                             placeholder="Enter topic..."
-                            className="flex-1 bg-white/20 border border-white/30 rounded-xl px-4 py-3 text-white placeholder:text-white/60 outline-none focus:bg-white/30 transition-all"
+                            className="min-w-0 flex-1 bg-white/20 border border-white/30 rounded-xl px-4 py-3 text-white placeholder:text-white/60 outline-none focus:bg-white/30 transition-all"
                         />
                         <button
                             onClick={handleGenerate}
@@ -122,6 +127,7 @@ export const AdminAdsManager: React.FC<AdminAdsManagerProps> = ({ onClose }) => 
                     ))}
                 </div>
             </div>
-        </div>
+          </Content>
+        </DialogPortal>
     );
 };

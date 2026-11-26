@@ -11,38 +11,42 @@ import { useSearch } from '../contexts/SearchContext';
 import { useScrollDirection } from '../hooks/useScrollDirection';
 
 interface GlobalSearchProps {
+    scrollContainer: React.RefObject<HTMLElement | null>;
+    viewKey: string;
+    enabled: boolean;
     onSelectInvoice?: (invoice: any) => void;
     onSelectCustomer?: (customer: any) => void;
 }
 
-const GlobalSearch: React.FC<GlobalSearchProps> = ({ onSelectInvoice, onSelectCustomer }) => {
+const GlobalSearch: React.FC<GlobalSearchProps> = ({ scrollContainer, viewKey, enabled, onSelectInvoice, onSelectCustomer }) => {
     const {
         isSearchVisible,
         setSearchVisible,
         searchQuery,
         setSearchQuery,
         searchResults,
+        isSearching,
         clearSearch
     } = useSearch();
 
-    const scrollDirection = useScrollDirection({ threshold: 10 });
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // Show/hide based on scroll direction
-    useEffect(() => {
-        if (scrollDirection === 'down' && !isSearchVisible) {
+    useScrollDirection(scrollContainer, viewKey, enabled, direction => {
+        if (direction === 'down') {
             setSearchVisible(true);
-        } else if (scrollDirection === 'up' && isSearchVisible && !searchQuery) {
+        } else if (!searchQuery) {
             setSearchVisible(false);
         }
-    }, [scrollDirection, isSearchVisible, searchQuery, setSearchVisible]);
+    });
 
-    // Focus input when visible
     useEffect(() => {
-        if (isSearchVisible && inputRef.current) {
-            inputRef.current.focus();
-        }
-    }, [isSearchVisible]);
+        clearSearch();
+    }, [viewKey, enabled, clearSearch]);
+
+    function dismissSearch() {
+        inputRef.current?.blur();
+        clearSearch();
+    }
 
     const handleResultClick = (result: any) => {
         if (result.type === 'invoice' && onSelectInvoice) {
@@ -50,7 +54,7 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ onSelectInvoice, onSelectCu
         } else if (result.type === 'customer' && onSelectCustomer) {
             onSelectCustomer(result.data);
         }
-        clearSearch();
+        dismissSearch();
     };
 
     const getIcon = (type: string) => {
@@ -73,7 +77,7 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ onSelectInvoice, onSelectCu
 
     return (
         <AnimatePresence>
-            {isSearchVisible && (
+            {enabled && isSearchVisible && (
                 <motion.div
                     initial={{ y: -60, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
@@ -82,15 +86,22 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ onSelectInvoice, onSelectCu
                         duration: 0.2,
                         ease: [0.4, 0, 0.2, 1] // Material easing
                     }}
-                    className="fixed top-0 left-0 right-0 z-[200] bg-surface/95 backdrop-blur-xl border-b border-outline-variant/30 shadow-lg"
+                    onKeyDown={event => {
+                        if (event.key === 'Escape') {
+                            event.preventDefault();
+                            dismissSearch();
+                        }
+                    }}
+                    className="fixed top-0 left-0 right-0 z-[200] bg-surface/95 pt-safe-top backdrop-blur-xl border-b border-outline-variant/30 shadow-lg"
                 >
                     {/* Search Input */}
                     <div className="px-4 py-3 flex items-center gap-3">
-                        <div className="flex-1 relative">
+                        <div className="flex-1 min-w-0 relative">
                             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-on-surface-variant" />
                             <input
                                 ref={inputRef}
                                 type="text"
+                                aria-label="Search bills, customers, products"
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 placeholder="Search bills, customers, products..."
@@ -98,6 +109,8 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ onSelectInvoice, onSelectCu
                             />
                             {searchQuery && (
                                 <motion.button
+                                    type="button"
+                                    aria-label="Clear search text"
                                     initial={{ scale: 0 }}
                                     animate={{ scale: 1 }}
                                     onClick={() => setSearchQuery('')}
@@ -108,24 +121,25 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({ onSelectInvoice, onSelectCu
                             )}
                         </div>
                         <motion.button
+                            type="button"
                             whileTap={{ scale: 0.9 }}
-                            onClick={clearSearch}
-                            className="text-xs font-bold text-on-surface-variant uppercase tracking-wider"
+                            onClick={dismissSearch}
+                            className="min-h-11 shrink-0 px-2 text-xs font-bold text-on-surface-variant uppercase tracking-wider"
                         >
                             Cancel
                         </motion.button>
                     </div>
 
                     {/* Search Results */}
-                    {searchQuery && (
+                    {searchQuery.trim() && (
                         <motion.div
                             initial={{ opacity: 0, y: -10 }}
                             animate={{ opacity: 1, y: 0 }}
                             className="max-h-[60vh] overflow-y-auto border-t border-outline-variant/20"
                         >
-                            {searchResults.length === 0 ? (
+                            {isSearching || searchResults.length === 0 ? (
                                 <div className="p-8 text-center">
-                                    <p className="text-sm text-on-surface-variant">No results found</p>
+                                    <p role="status" className="text-sm text-on-surface-variant">{isSearching ? 'Searching…' : 'No results found'}</p>
                                 </div>
                             ) : (
                                 <motion.div

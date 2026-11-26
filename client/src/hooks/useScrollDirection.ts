@@ -1,56 +1,43 @@
-/**
- * useScrollDirection Hook
- * Detects scroll direction with threshold to avoid false triggers
- */
+import { useEffect, useEffectEvent } from 'react';
+import type { RefObject } from 'react';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+type ScrollDirection = 'up' | 'down';
 
-export type ScrollDirection = 'up' | 'down' | null;
-
-interface UseScrollDirectionOptions {
-    threshold?: number;
-    targetElement?: HTMLElement | null;
-}
-
-export const useScrollDirection = (options: UseScrollDirectionOptions = {}) => {
-    const { threshold = 10, targetElement } = options;
-    const [scrollDirection, setScrollDirection] = useState<ScrollDirection>(null);
-    const lastScrollY = useRef(0);
-    const ticking = useRef(false);
-
-    const updateScrollDirection = useCallback(() => {
-        const scrollY = targetElement
-            ? targetElement.scrollTop
-            : window.scrollY || document.documentElement.scrollTop;
-
-        const delta = scrollY - lastScrollY.current;
-
-        if (Math.abs(delta) >= threshold) {
-            const direction: ScrollDirection = delta > 0 ? 'down' : 'up';
-            setScrollDirection(direction);
-            lastScrollY.current = scrollY;
-        }
-
-        ticking.current = false;
-    }, [threshold, targetElement]);
-
-    const handleScroll = useCallback(() => {
-        if (!ticking.current) {
-            window.requestAnimationFrame(updateScrollDirection);
-            ticking.current = true;
-        }
-    }, [updateScrollDirection]);
+export function useScrollDirection(
+    targetRef: RefObject<HTMLElement | null>,
+    viewKey: string,
+    enabled: boolean,
+    onDirection: (direction: ScrollDirection) => void,
+) {
+    const notify = useEffectEvent(onDirection);
 
     useEffect(() => {
-        const target = targetElement || window;
-        target.addEventListener('scroll', handleScroll, { passive: true });
+        const target = targetRef.current;
+        if (!target || !enabled) return;
 
-        return () => {
-            target.removeEventListener('scroll', handleScroll);
+        let lastPosition = Math.max(0, target.scrollTop);
+        let previousDirection: ScrollDirection | undefined;
+        let frame = 0;
+
+        const onScroll = () => {
+            if (frame) return;
+            frame = window.requestAnimationFrame(() => {
+                frame = 0;
+                const position = Math.max(0, target.scrollTop);
+                const difference = position - lastPosition;
+                if (Math.abs(difference) < 10) return;
+                lastPosition = position;
+                const direction = difference > 0 ? 'down' : 'up';
+                if (direction === previousDirection) return;
+                previousDirection = direction;
+                notify(direction);
+            });
         };
-    }, [handleScroll, targetElement]);
 
-    return scrollDirection;
-};
-
-export default useScrollDirection;
+        target.addEventListener('scroll', onScroll, { passive: true });
+        return () => {
+            target.removeEventListener('scroll', onScroll);
+            window.cancelAnimationFrame(frame);
+        };
+    }, [targetRef, viewKey, enabled]);
+}

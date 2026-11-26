@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import Sidebar from '../../components/Sidebar';
 import MobileBottomNav from '../../components/MobileBottomNav';
@@ -50,6 +51,7 @@ import { PermissionErrorModal } from '@/components/PermissionErrorModal';
 import { WhatsAppNumberModal } from '@/components/WhatsAppNumberModal';
 import { SearchProvider } from '@/contexts/SearchContext';
 import GlobalSearch from '@/components/GlobalSearch';
+import { ANNOUNCEMENTS_PANEL } from '@/components/AdminAdsManager';
 
 const STARTUP_WAIT_MS = 12_000;
 
@@ -88,8 +90,11 @@ const AccountingApp: React.FC = () => {
     const { user, loading: authLoading } = useAuth();
     const { company, loading: companyLoading, loadFailed: companyLoadFailed, permissionError } = useCompany();
     const { theme, setTheme } = useTheme();
+    const location = useLocation();
+    const scrollContainer = React.useRef<HTMLElement>(null);
+    const announcementsOpen = location.state?.settingsPanel === ANNOUNCEMENTS_PANEL;
 
-    const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
+    const [currentView, setCurrentView] = useState<ViewState>(() => announcementsOpen ? ViewState.SETTINGS : ViewState.DASHBOARD);
     const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
     const [invoiceToEdit, setInvoiceToEdit] = useState<Invoice | null>(null);
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
@@ -347,6 +352,9 @@ const AccountingApp: React.FC = () => {
             >
                 {/* Global Search - Scroll Direction Based */}
                 <GlobalSearch
+                    scrollContainer={scrollContainer}
+                    viewKey={currentView}
+                    enabled={!announcementsOpen && !isSidebarOpen}
                     onSelectInvoice={handleSearchSelectInvoice}
                     onSelectCustomer={handleSearchSelectCustomer}
                 />
@@ -385,7 +393,7 @@ const AccountingApp: React.FC = () => {
                     </div>
                 </div>
 
-                <main className="flex-1 overflow-y-auto h-full relative w-full scroll-smooth bg-slate-50 dark:bg-slate-900 pb-20 lg:pb-0">
+                <main ref={scrollContainer} className="flex-1 overflow-y-auto h-full relative w-full scroll-smooth bg-slate-50 dark:bg-slate-900 pb-20 lg:pb-0">
                     {!['DASHBOARD', 'VIEW_INVOICE', 'CREATE_INVOICE', 'EDIT_INVOICE', 'CREATE_VOUCHER', 'PUBLIC_VIEW_INVOICE', 'CREATE_PURCHASE', 'EDIT_PURCHASE', 'SMART_CALCULATOR', 'CREDIT_NOTE', 'CREATE_CREDIT_NOTE', 'CUSTOMER_LEDGER', 'REPORTS', 'POS_BILLING', 'CASH_AND_BANK', 'GODOWNS', 'BARCODE_LABELS', 'ONLINE_STORE', 'PAYMENT_REMINDERS', 'AUTOMATED_BILLS', 'COMPLIANCE_CENTER', 'STAFF_ROLES', 'RECYCLE_BIN'].includes(currentView) && (
                         <div className="md:hidden sticky top-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm border-b border-slate-200/50 dark:border-slate-800/50 shadow-sm">
                             <div className="h-16 px-4 flex items-center justify-between">

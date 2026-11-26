@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { CompanyProfile, InvoiceFormat } from '../types';
 import { StorageService } from '../services/storageService';
 import { AIService } from '../services/aiService';
@@ -13,11 +14,36 @@ import RefundModal from '../modules/accounting/pages/RefundModal';
 import { InputModal } from '@/components/InputModal';
 import { ConfirmationModal } from '@/components/ConfirmationModal';
 import { AlertModal } from '@/components/AlertModal';
-import { AdminAdsManager } from './AdminAdsManager';
+import { AdminAdsManager, ANNOUNCEMENTS_PANEL } from './AdminAdsManager';
+import { Dialog, DialogTrigger } from './ui/dialog';
+import { useSearch } from '@/contexts/SearchContext';
 
 const Settings: React.FC = () => {
   const { company, saveCompany } = useCompany();
   const { user, deleteAccount } = useAuth();
+  const { clearSearch } = useSearch();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const showAdminAds = location.state?.settingsPanel === ANNOUNCEMENTS_PANEL;
+  const closingEntry = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!showAdminAds) closingEntry.current = null;
+  }, [showAdminAds]);
+
+  const setShowAdminAds = (open: boolean) => {
+    if (open === showAdminAds) return;
+    if (open) {
+      closingEntry.current = null;
+      clearSearch();
+      navigate({ pathname: location.pathname, search: location.search, hash: location.hash }, {
+        state: { ...location.state, settingsPanel: ANNOUNCEMENTS_PANEL },
+      });
+    } else if (closingEntry.current !== location.key) {
+      closingEntry.current = location.key;
+      navigate(-1);
+    }
+  };
 
   const [profile, setProfile] = useState<CompanyProfile>({
     name: '',
@@ -43,7 +69,6 @@ const Settings: React.FC = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showBackupModal, setShowBackupModal] = useState(false);
-  const [showAdminAds, setShowAdminAds] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [appLang, setAppLangState] = useState<AppLanguage>(() => getAppLanguage());
   const [thermalSize, setThermalSize] = useState<'58mm' | '80mm'>(() => company?.thermalSize || StorageService.getCompanyProfile().thermalSize || '80mm');
@@ -198,6 +223,7 @@ const Settings: React.FC = () => {
   );
 
   return (
+    <Dialog open={showAdminAds} onOpenChange={setShowAdminAds}>
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-24">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl px-4 pt-safe pb-4 border-b border-slate-200 dark:border-slate-800">
@@ -224,16 +250,18 @@ const Settings: React.FC = () => {
 
         {/* Business Announcements (Available to all Business Owners) */}
         <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-3xl p-1 shadow-lg overflow-hidden relative">
-          <button onClick={() => setShowAdminAds(true)} className="w-full p-4 flex items-center justify-between text-white relative z-10">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-white/10 rounded-xl"><Shield className="w-6 h-6 text-yellow-400" /></div>
-              <div className="text-left">
-                <div className="font-bold">Business Announcements</div>
-                <div className="text-xs opacity-60">Create Banners & Updates</div>
+          <DialogTrigger asChild>
+            <button type="button" className="w-full p-4 flex items-center justify-between text-white relative z-10">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-white/10 rounded-xl"><Shield className="w-6 h-6 text-yellow-400" /></div>
+                <div className="text-left">
+                  <div className="font-bold">Business Announcements</div>
+                  <div className="text-xs opacity-60">Create Banners & Updates</div>
+                </div>
               </div>
-            </div>
-            <ChevronRight className="w-5 h-5 opacity-60" />
-          </button>
+              <ChevronRight className="w-5 h-5 opacity-60" />
+            </button>
+          </DialogTrigger>
         </div>
 
         {/* Business Section */}
@@ -819,8 +847,9 @@ const Settings: React.FC = () => {
         )
       }
 
-      {showAdminAds && <AdminAdsManager onClose={() => setShowAdminAds(false)} />}
+      {showAdminAds && <AdminAdsManager />}
     </div>
+    </Dialog>
   );
 };
 

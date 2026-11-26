@@ -3,7 +3,7 @@
  * Provides centralized search state across the app
  */
 
-import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { StorageService } from '../services/storageService';
 import { Invoice, Customer } from '../types';
 
@@ -32,15 +32,9 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [searchQuery, setSearchQueryState] = useState('');
     const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
     const [isSearching, setIsSearching] = useState(false);
+    const pendingSearch = useRef<number | undefined>(undefined);
 
     const performSearch = useCallback((query: string) => {
-        if (!query.trim()) {
-            setSearchResults([]);
-            setIsSearching(false);
-            return;
-        }
-
-        setIsSearching(true);
         const lowerQuery = query.toLowerCase().trim();
         const results: SearchResultItem[] = [];
 
@@ -102,18 +96,19 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, []);
 
     const setSearchQuery = useCallback((query: string) => {
+        window.clearTimeout(pendingSearch.current);
         setSearchQueryState(query);
-        const timeoutId = setTimeout(() => {
-            performSearch(query);
-        }, 300);
-        return () => clearTimeout(timeoutId);
+        setSearchResults([]);
+        setIsSearching(Boolean(query.trim()));
+        if (query.trim()) pendingSearch.current = window.setTimeout(() => performSearch(query), 300);
     }, [performSearch]);
 
     const clearSearch = useCallback(() => {
-        setSearchQueryState('');
-        setSearchResults([]);
+        setSearchQuery('');
         setSearchVisible(false);
-    }, []);
+    }, [setSearchQuery]);
+
+    useEffect(() => () => window.clearTimeout(pendingSearch.current), []);
 
     const value = useMemo(() => ({
         isSearchVisible,
