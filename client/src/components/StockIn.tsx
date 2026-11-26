@@ -158,6 +158,14 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
     setLines(prev => prev.filter(l => l.productId !== productId));
   };
 
+  const changeScannedQuantity = (productId: string, delta: -1 | 1) => {
+    setLines(prev => prev.flatMap(line => {
+      if (line.productId !== productId) return [line];
+      const quantity = Number(line.quantity) + delta;
+      return quantity > 0 ? [{ ...line, quantity }] : [];
+    }));
+  };
+
   const createProductFromScan = () => {
     if (!newProduct) return;
     const name = newProduct.name.trim();
@@ -386,7 +394,11 @@ const StockIn: React.FC<StockInProps> = ({ onBack }) => {
             cameraFeedback={statusMsg}
             scanDraft={{
               title: 'Stock entry',
-              lines: lines.map(line => ({ id: line.productId, name: line.name, quantity: Number(line.quantity), amount: line.unitCost == null ? undefined : line.quantity * line.unitCost })),
+              lines: lines.map(line => ({
+                id: line.productId, name: line.name, quantity: Number(line.quantity),
+                amount: line.unitCost == null ? undefined : line.quantity * line.unitCost,
+                changeQuantity: delta => changeScannedQuantity(line.productId, delta),
+              })),
               total: totalValue,
               totalLabel: 'Stock entry value',
             }}
