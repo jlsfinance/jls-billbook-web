@@ -57,6 +57,7 @@ export enum ViewState {
 
 export interface Expense {
   id: string;
+  createdBy?: string;
   category: string; // e.g., 'Rent', 'Electricity', 'Salary', 'Tea/Snacks'
   description?: string;
   amount: number;
@@ -165,6 +166,7 @@ export interface PaymentAllocation {
 
 export interface Payment {
   id: string;
+  createdBy?: string;
   customerId: string;
   date: string;
   amount: number;
@@ -214,6 +216,7 @@ export interface AdditionalCharge {
 
 export interface Invoice {
   id: string;
+  createdBy?: string;
   type?: VoucherType;
   invoiceNumber: string;
   customerId: string;

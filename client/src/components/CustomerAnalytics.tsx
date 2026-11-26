@@ -13,6 +13,8 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { addBrandedFooter } from '../services/pdfFooterUtils';
+import { amount } from '../services/businessReports';
+import { getPaymentAllocations } from '../services/paymentAllocation';
 
 interface CustomerAnalyticsProps {
     onBack: () => void;
@@ -22,7 +24,7 @@ interface CustomerScore {
     customer: Customer;
     totalPurchases: number;
     totalPayments: number;
-    avgDaysToPayment: number;
+    avgDaysToPayment: number | null;
     purchaseFrequency: number; // purchases per month
     outstandingBalance: number;
     creditRiskScore: number; // 0-100, higher = riskier
@@ -50,30 +52,29 @@ const CustomerAnalytics: React.FC<CustomerAnalyticsProps> = ({ onBack }) => {
     // Calculate customer scores
     const customerScores = useMemo((): CustomerScore[] => {
         return customers.map(customer => {
-            const customerInvoices = invoices.filter(inv => inv.customerId === customer.id && inv.type !== 'CREDIT_NOTE');
-            const customerPayments = payments.filter(p => p.customerId === customer.id && p.type !== 'PAID');
+            const customerVouchers = invoices.filter(inv => inv.customerId === customer.id && inv.conversionStatus !== 'CANCELLED');
+            const customerInvoices = customerVouchers.filter(inv => inv.type !== 'CREDIT_NOTE');
+            const customerPayments = payments.filter(p => p.customerId === customer.id && p.type !== 'PAID' &&
+                (p.mode !== 'CHEQUE' || p.chequeStatus !== 'PENDING' && p.chequeStatus !== 'BOUNCED'));
+            const salesById = new Map(customerInvoices.map(invoice => [invoice.id, invoice]));
 
-            const totalPurchases = customerInvoices.reduce((sum, inv) => sum + inv.total, 0);
-            const totalPayments = customerPayments.reduce((sum, p) => sum + p.amount, 0);
+            const totalPurchases = customerVouchers.reduce((sum, inv) => sum + (inv.type === 'CREDIT_NOTE' ? -1 : 1) * amount(inv.total), 0);
+            const totalPayments = customerPayments.reduce((sum, p) => sum + amount(p.amount), 0);
 
             // Calculate avg days to payment
             let totalDays = 0;
-            let paymentCount = 0;
-            customerPayments.forEach(payment => {
-                const relatedInvoice = customerInvoices.find(inv =>
-                    new Date(payment.date) >= new Date(inv.date)
-                );
-                if (relatedInvoice) {
-                    const daysDiff = Math.floor(
-                        (new Date(payment.date).getTime() - new Date(relatedInvoice.date).getTime()) / (1000 * 60 * 60 * 24)
-                    );
-                    if (daysDiff >= 0 && daysDiff < 365) {
-                        totalDays += daysDiff;
-                        paymentCount++;
-                    }
+            let allocatedAmount = 0;
+            for (const payment of customerPayments) {
+                for (const allocation of getPaymentAllocations(payment)) {
+                    const invoice = salesById.get(allocation.invoiceId);
+                    if (!invoice || amount(allocation.amount) <= 0) continue;
+                    const days = (Date.parse(payment.date.slice(0, 10)) - Date.parse(invoice.date.slice(0, 10))) / 86_400_000;
+                    if (!Number.isFinite(days) || days < 0) continue;
+                    totalDays += days * amount(allocation.amount);
+                    allocatedAmount += amount(allocation.amount);
                 }
-            });
-            const avgDaysToPayment = paymentCount > 0 ? totalDays / paymentCount : 30;
+            }
+            const avgDaysToPayment = allocatedAmount > 0 ? Math.round(totalDays / allocatedAmount) : null;
 
             // Purchase frequency (purchases per month over last 6 months)
             const sixMonthsAgo = new Date();
@@ -91,13 +92,13 @@ const CustomerAnalytics: React.FC<CustomerAnalyticsProps> = ({ onBack }) => {
             let riskScore = 0;
 
             // Factor 1: Outstanding balance (40% weight)
-            const balanceRatio = customer.balance / Math.max(totalPurchases, 1);
+            const balanceRatio = Math.max(amount(customer.balance), 0) / Math.max(totalPurchases, 1);
             riskScore += Math.min(balanceRatio * 100, 40);
 
             // Factor 2: Avg days to pay (30% weight)
-            if (avgDaysToPayment > 60) riskScore += 30;
-            else if (avgDaysToPayment > 30) riskScore += 20;
-            else if (avgDaysToPayment > 15) riskScore += 10;
+            if ((avgDaysToPayment ?? 0) > 60) riskScore += 30;
+            else if ((avgDaysToPayment ?? 0) > 30) riskScore += 20;
+            else if ((avgDaysToPayment ?? 0) > 15) riskScore += 10;
 
             // Factor 3: Purchase frequency (30% weight) - lower frequency = higher risk if balance exists
             if (customer.balance > 0 && purchaseFrequency < 0.5) riskScore += 30;
@@ -112,7 +113,7 @@ const CustomerAnalytics: React.FC<CustomerAnalyticsProps> = ({ onBack }) => {
                 customer,
                 totalPurchases,
                 totalPayments,
-                avgDaysToPayment: Math.round(avgDaysToPayment),
+                avgDaysToPayment,
                 purchaseFrequency: Math.round(purchaseFrequency * 10) / 10,
                 outstandingBalance: customer.balance,
                 creditRiskScore,
@@ -126,8 +127,8 @@ const CustomerAnalytics: React.FC<CustomerAnalyticsProps> = ({ onBack }) => {
     // Late payers (sorted by avg days)
     const latePayers = useMemo(() =>
         [...customerScores]
-            .filter(cs => cs.avgDaysToPayment > 15 || cs.outstandingBalance > 0)
-            .sort((a, b) => b.avgDaysToPayment - a.avgDaysToPayment)
+            .filter(cs => (cs.avgDaysToPayment ?? 0) > 15 || cs.outstandingBalance > 0)
+            .sort((a, b) => (b.avgDaysToPayment ?? 0) - (a.avgDaysToPayment ?? 0))
             .slice(0, 10),
         [customerScores]
     );
@@ -153,9 +154,8 @@ const CustomerAnalytics: React.FC<CustomerAnalyticsProps> = ({ onBack }) => {
     const summaryStats = useMemo(() => {
         const highRiskCount = customerScores.filter(cs => cs.riskLevel === 'HIGH').length;
         const totalOutstanding = customerScores.reduce((sum, cs) => sum + Math.max(cs.outstandingBalance, 0), 0);
-        const avgPaymentDays = customerScores.length > 0
-            ? Math.round(customerScores.reduce((sum, cs) => sum + cs.avgDaysToPayment, 0) / customerScores.length)
-            : 0;
+        const durations = customerScores.flatMap(cs => cs.avgDaysToPayment == null ? [] : [cs.avgDaysToPayment]);
+        const avgPaymentDays = durations.length ? Math.round(durations.reduce((sum, days) => sum + days, 0) / durations.length) : null;
         const regularBuyers = customerScores.filter(cs => cs.purchaseFrequency >= 1).length;
 
         return { highRiskCount, totalOutstanding, avgPaymentDays, regularBuyers };
@@ -185,7 +185,7 @@ const CustomerAnalytics: React.FC<CustomerAnalyticsProps> = ({ onBack }) => {
             body: [
                 ['Total Outstanding', `₹${summaryStats.totalOutstanding.toLocaleString()}`],
                 ['High Risk Customers', summaryStats.highRiskCount.toString()],
-                ['Avg. Payment Days', `${summaryStats.avgPaymentDays} days`],
+                ['Avg. Payment Days', summaryStats.avgPaymentDays == null ? '—' : `${summaryStats.avgPaymentDays} days`],
                 ['Regular Buyers (1+/month)', summaryStats.regularBuyers.toString()]
             ],
             theme: 'grid',
@@ -206,7 +206,7 @@ const CustomerAnalytics: React.FC<CustomerAnalyticsProps> = ({ onBack }) => {
             body: highRiskCustomers.map(cs => [
                 cs.customer.name,
                 `₹${cs.outstandingBalance.toFixed(0)}`,
-                `${cs.avgDaysToPayment} days`,
+                cs.avgDaysToPayment == null ? '—' : `${cs.avgDaysToPayment} days`,
                 `${cs.creditRiskScore}%`
             ]),
             theme: 'grid',
@@ -329,7 +329,7 @@ const CustomerAnalytics: React.FC<CustomerAnalyticsProps> = ({ onBack }) => {
                                     <Clock className="w-4 h-4" />
                                     <span className="text-[10px] font-bold uppercase tracking-wider">Avg Payment</span>
                                 </div>
-                                <p className="text-2xl font-black">{summaryStats.avgPaymentDays}</p>
+                                <p className="text-2xl font-black">{summaryStats.avgPaymentDays ?? '—'}</p>
                                 <p className="text-[10px] opacity-70">days avg</p>
                             </motion.div>
 
@@ -391,7 +391,7 @@ const CustomerAnalytics: React.FC<CustomerAnalyticsProps> = ({ onBack }) => {
                                         <p className="text-sm font-bold text-slate-800 dark:text-white">{cs.customer.name}</p>
                                         <div className="flex items-center gap-3 mt-1">
                                             <span className="text-[10px] text-slate-400">
-                                                Avg: <span className="font-bold text-orange-600">{cs.avgDaysToPayment} days</span>
+                                                Avg: <span className="font-bold text-orange-600">{cs.avgDaysToPayment == null ? '—' : `${cs.avgDaysToPayment} days`}</span>
                                             </span>
                                             <span className="text-[10px] text-slate-400">
                                                 Due: <span className="font-bold text-red-600">{formatCurrency(cs.outstandingBalance)}</span>

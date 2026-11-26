@@ -203,6 +203,10 @@ function storePayment(payment: Payment, index: number) {
   }
 }
 
+function recordCreator(entry: { createdBy?: string }) {
+  if (!entry.createdBy && cache.currentUserId) entry.createdBy = cache.currentUserId;
+}
+
 export const StorageService = {
   getUserId: (): string | null => cache.currentUserId,
 
@@ -714,6 +718,7 @@ export const StorageService = {
     if (alreadySaved || (!invoice.stockDeducted && hasIdempotencyKey(cache.stockMovements, invoiceKey))) {
       return { ok: false, error: 'Ye entry pehle hi save ho chuki hai.' };
     }
+    recordCreator(invoice);
 
     const workingProducts = [...cache.products];
     const movements: StockMovement[] = [];
@@ -850,6 +855,7 @@ export const StorageService = {
   },
 
   saveCreditNote: (invoice: Invoice) => {
+    recordCreator(invoice);
     invoice.type = 'CREDIT_NOTE';
     invoice.publicToken = invoice.publicToken || crypto.randomUUID();
 
@@ -969,6 +975,7 @@ export const StorageService = {
   savePayment: (payment: Payment) => {
     if (!Number.isFinite(payment.amount) || payment.amount <= 0 || cache.payments.some(item => item.id === payment.id)) return;
     const enriched: Payment = { ...payment, accountId: paymentAccount(payment), amount: roundCurrency(payment.amount) };
+    recordCreator(enriched);
     if (enriched.amount <= 0) return;
     if (enriched.isDeleted) {
       storePayment(enriched, -1);
@@ -994,6 +1001,7 @@ export const StorageService = {
 
     const previous = cache.payments[index];
     const next: Payment = { ...updatedPayment, amount, accountId: paymentAccount(updatedPayment) };
+    if (previous.createdBy) next.createdBy = previous.createdBy;
     const directionChanged = (previous.type === 'PAID') !== (next.type === 'PAID');
     const changedAmount = previous.amount !== next.amount;
     const changedParty = previous.customerId !== next.customerId;
@@ -1062,6 +1070,7 @@ export const StorageService = {
 
   // --- Purchase Logic ---
   savePurchase: (purchase: Invoice) => {
+    recordCreator(purchase);
     purchase.type = purchase.type || 'PURCHASE';
     const newProducts = [...cache.products];
 
@@ -1152,6 +1161,7 @@ export const StorageService = {
     if (oldIndex === -1) return;
 
     const oldPurchase = cache.purchases[oldIndex];
+    if (oldPurchase.createdBy) updatedPurchase.createdBy = oldPurchase.createdBy;
 
     // 1. Revert Old Stock
     oldPurchase.items.forEach(item => {
@@ -1213,6 +1223,7 @@ export const StorageService = {
     const oldInvoiceIndex = cache.invoices.findIndex(i => i.id === updatedInvoice.id);
     if (oldInvoiceIndex === -1) return;
     const oldInvoice = cache.invoices[oldInvoiceIndex];
+    if (oldInvoice.createdBy) updatedInvoice.createdBy = oldInvoice.createdBy;
 
     const modifiedProductIds = new Set<string>();
     const oldIsCreditNote = oldInvoice.type === 'CREDIT_NOTE';
@@ -1402,12 +1413,14 @@ export const StorageService = {
     const index = cache.expenses.findIndex(e => e.id === enriched.id);
     if (index >= 0) {
       const prev = cache.expenses[index];
+      if (prev.createdBy) enriched.createdBy = prev.createdBy;
       const delta = prev.amount - enriched.amount;
       if (delta !== 0) {
         StorageService._creditOrDebitAccount(accId, delta, 'EXPENSE', enriched.date, enriched.id, enriched.vendorName, `Updated Expense: ${enriched.category}`);
       }
       cache.expenses[index] = enriched;
     } else {
+      recordCreator(enriched);
       cache.expenses.unshift(enriched);
       StorageService._creditOrDebitAccount(accId, -enriched.amount, 'EXPENSE', enriched.date, enriched.id, enriched.vendorName, `${enriched.category}${enriched.description ? ` - ${enriched.description}` : ''}`);
     }
@@ -1591,6 +1604,7 @@ export const StorageService = {
       return { ok: true };
     }
     if (vType === 'DEBIT_NOTE') {
+      recordCreator(voucher);
       const nextProducts = [...cache.products];
       voucher.items.forEach(item => {
         const pIdx = nextProducts.findIndex(p => p.id === item.productId);
@@ -1657,6 +1671,7 @@ export const StorageService = {
     const arr = cache[listKey];
     const idx = arr.findIndex(v => v.id === voucher.id);
     if (idx >= 0) {
+      if (arr[idx].createdBy) voucher.createdBy = arr[idx].createdBy;
       arr[idx] = voucher;
       StorageService.persistToLocalStorage();
       if (FirebaseService.isReady()) FirebaseService.saveDocument(StorageService.getCollectionPath(listKey), voucher.id, voucher);
@@ -1693,6 +1708,7 @@ export const StorageService = {
       stockDeducted: src.type === 'DELIVERY_CHALLAN' && targetType === 'SALE' ? Boolean(src.stockDeducted) : false,
       saveIdempotencyKey: undefined,
     };
+    delete converted.createdBy;
 
     const result = StorageService.saveVoucher(converted);
     if (!result.ok) return null;

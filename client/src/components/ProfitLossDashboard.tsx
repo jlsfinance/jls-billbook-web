@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
     ArrowLeft, TrendingUp, DollarSign,
@@ -6,7 +6,7 @@ import {
     BarChart3, Share2
 } from 'lucide-react';
 import { StorageService } from '../services/storageService';
-import { Invoice, Product, Expense } from '../types';
+import { amount, inReportRange, localDay, netSaleProfit } from '../services/businessReports';
 import { formatDate } from '../utils/dateUtils';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -26,131 +26,64 @@ interface ProfitLossDashboardProps {
 interface ProductProfit {
     name: string;
     revenue: number;
-    cost: number;
-    profit: number;
-    margin: number;
+    cost: number | null;
+    profit: number | null;
+    margin: number | null;
     quantity: number;
 }
 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'];
+const formatAmount = (value: number | null) => value == null ? 'Cost missing' : `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+const formatPercent = (value: number | null) => value == null ? '—' : `${value.toFixed(1)}%`;
 
 const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => {
     // Date Range
     const [fromDate, setFromDate] = useState(
-        new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
+        localDay().slice(0, 8) + '01'
     );
-    const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
+    const [toDate, setToDate] = useState(localDay);
     const [datePreset, setDatePreset] = useState<'TODAY' | 'WEEK' | 'MONTH' | 'CUSTOM'>('MONTH');
 
-    // Data
-    const [invoices, setInvoices] = useState<Invoice[]>([]);
-    const [creditNotes, setCreditNotes] = useState<Invoice[]>([]);
-    const [expenses, setExpenses] = useState<Expense[]>([]);
-    const [products, setProducts] = useState<Product[]>([]);
+    const validRange = Boolean(fromDate && toDate && fromDate <= toDate);
+    const rows = useMemo(() => netSaleProfit(
+        StorageService.getInvoices().filter(v => validRange && inReportRange(v.date, fromDate, toDate)),
+        StorageService.getProducts(),
+        StorageService.getPurchases(),
+    ), [fromDate, toDate, validRange]);
+    const totalExpenses = useMemo(() => StorageService.getExpenses()
+        .filter(e => validRange && inReportRange(e.date, fromDate, toDate))
+        .reduce((sum, e) => sum + amount(e.amount) - (e.itcEligible ? amount(e.gstAmount) : 0), 0), [fromDate, toDate, validRange]);
 
-    useEffect(() => {
-        loadData();
-    }, [fromDate, toDate]);
-
-    const loadData = () => {
-        const allInvoices = StorageService.getInvoices();
-        const allExpenses = StorageService.getExpenses();
-        const allProducts = StorageService.getProducts();
-
-        // Filter by date
-        const filteredInvoices = allInvoices.filter(
-            inv => inv.date >= fromDate && inv.date <= toDate && inv.type !== 'CREDIT_NOTE'
-        );
-        const filteredCN = allInvoices.filter(
-            inv => inv.date >= fromDate && inv.date <= toDate && inv.type === 'CREDIT_NOTE'
-        );
-        const filteredExpenses = allExpenses.filter(
-            e => e.date >= fromDate && e.date <= toDate
-        );
-
-        setInvoices(filteredInvoices);
-        setCreditNotes(filteredCN);
-        setExpenses(filteredExpenses);
-        setProducts(allProducts);
-    };
-
-    // Calculate P&L metrics (Revenue net of Returns, COGS from purchasePrice, Net Profit after Business Expenses)
     const metrics = useMemo(() => {
-        const grossSales = invoices.reduce((sum, inv) => sum + inv.total, 0);
-        const returnsTotal = creditNotes.reduce((sum, cn) => sum + cn.total, 0);
-        const totalRevenue = Math.max(0, grossSales - returnsTotal);
-
-        let totalCost = 0;
-        invoices.forEach(inv => {
-            inv.items.forEach(item => {
-                const product = products.find(p => p.id === item.productId);
-                const costPrice = product?.purchasePrice ?? (item.rate * 0.7);
-                totalCost += costPrice * item.quantity;
-            });
-        });
-        creditNotes.forEach(cn => {
-            cn.items.forEach(item => {
-                const product = products.find(p => p.id === item.productId);
-                const costPrice = product?.purchasePrice ?? (item.rate * 0.7);
-                totalCost -= costPrice * item.quantity;
-            });
-        });
-        totalCost = Math.max(0, totalCost);
-
-        const grossProfit = totalRevenue - totalCost;
-        const profitMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
-
-        const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-
+        const totalRevenue = rows.reduce((sum, row) => sum + row.net, 0);
+        const missing = rows.filter(row => row.cost == null).length;
+        const totalCost = missing ? null : rows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
+        const grossProfit = totalCost == null ? null : totalRevenue - totalCost;
         return {
-            totalRevenue,
-            totalCost,
-            grossProfit,
-            profitMargin,
-            totalExpenses,
-            netProfit: grossProfit - totalExpenses
+            totalRevenue, totalCost, grossProfit, totalExpenses, missing,
+            profitMargin: grossProfit == null || totalRevenue <= 0 ? null : grossProfit / totalRevenue * 100,
+            netProfit: grossProfit == null ? null : grossProfit - totalExpenses,
         };
-    }, [invoices, creditNotes, expenses, products]);
+    }, [rows, totalExpenses]);
 
     // Product-wise profit analysis
     const productProfits = useMemo((): ProductProfit[] => {
-        const profitMap: Record<string, ProductProfit> = {};
-
-        invoices.forEach(inv => {
-            inv.items.forEach(item => {
-                const product = products.find(p => p.id === item.productId);
-                const costPrice = product?.purchasePrice || (item.rate * 0.7);
-                const revenue = item.rate * item.quantity;
-                const cost = costPrice * item.quantity;
-                const profit = revenue - cost;
-
-                if (!profitMap[item.productId]) {
-                    profitMap[item.productId] = {
-                        name: item.description || product?.name || 'Unknown',
-                        revenue: 0,
-                        cost: 0,
-                        profit: 0,
-                        margin: 0,
-                        quantity: 0
-                    };
-                }
-
-                profitMap[item.productId].revenue += revenue;
-                profitMap[item.productId].cost += cost;
-                profitMap[item.productId].profit += profit;
-                profitMap[item.productId].quantity += item.quantity;
-            });
-        });
-
-        // Calculate margins
-        return Object.values(profitMap)
-            .map(p => ({
-                ...p,
-                margin: p.revenue > 0 ? (p.profit / p.revenue) * 100 : 0
-            }))
-            .sort((a, b) => b.profit - a.profit)
-            .slice(0, 10); // Top 10
-    }, [invoices, products]);
+        const profitMap = new Map<string, ProductProfit>();
+        for (const { lines } of rows) {
+            for (const line of lines) {
+                const key = JSON.stringify([line.item.productId || line.item.description, line.item.unit]);
+                const row = profitMap.get(key) ?? { name: line.item.description, revenue: 0, cost: 0, profit: null, margin: null, quantity: 0 };
+                row.quantity += line.quantity;
+                row.revenue += line.revenue;
+                row.cost = row.cost == null || line.cost == null ? null : row.cost + line.cost;
+                profitMap.set(key, row);
+            }
+        }
+        return [...profitMap.values()].map(row => {
+            const profit = row.cost == null ? null : row.revenue - row.cost;
+            return { ...row, profit, margin: profit == null || row.revenue <= 0 ? null : profit / row.revenue * 100 };
+        }).sort((a, b) => b.revenue - a.revenue);
+    }, [rows]);
 
     // Best selling products chart data
     const bestSellingData = useMemo(() => {
@@ -163,9 +96,9 @@ const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => 
 
     // Profit distribution for pie chart
     const profitDistribution = useMemo(() => {
-        return productProfits.slice(0, 6).map((p, idx) => ({
+        return productProfits.filter(p => (p.profit ?? 0) > 0).sort((a, b) => (b.profit ?? 0) - (a.profit ?? 0)).slice(0, 6).map((p, idx) => ({
             name: p.name.length > 10 ? p.name.substring(0, 10) + '...' : p.name,
-            value: Math.round(p.profit),
+            value: Math.round(p.profit ?? 0),
             color: COLORS[idx % COLORS.length]
         }));
     }, [productProfits]);
@@ -177,18 +110,18 @@ const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => 
 
         switch (preset) {
             case 'TODAY':
-                setFromDate(today.toISOString().split('T')[0]);
-                setToDate(today.toISOString().split('T')[0]);
+                setFromDate(localDay(today));
+                setToDate(localDay(today));
                 break;
             case 'WEEK':
                 const weekAgo = new Date(today);
-                weekAgo.setDate(weekAgo.getDate() - 7);
-                setFromDate(weekAgo.toISOString().split('T')[0]);
-                setToDate(today.toISOString().split('T')[0]);
+                weekAgo.setDate(weekAgo.getDate() - 6);
+                setFromDate(localDay(weekAgo));
+                setToDate(localDay(today));
                 break;
             case 'MONTH':
-                setFromDate(new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0]);
-                setToDate(today.toISOString().split('T')[0]);
+                setFromDate(localDay(today).slice(0, 8) + '01');
+                setToDate(localDay(today));
                 break;
         }
     };
@@ -223,10 +156,13 @@ const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => 
         yPos += 8;
 
         const summaryData = [
-            ['Total Revenue', `₹${metrics.totalRevenue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`],
-            ['Cost of Goods Sold', `₹${metrics.totalCost.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`],
-            ['Gross Profit', `₹${metrics.grossProfit.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`],
-            ['Profit Margin', `${metrics.profitMargin.toFixed(1)}%`],
+            ['Net Revenue Before GST', formatAmount(metrics.totalRevenue)],
+            ['Cost of Goods Sold', formatAmount(metrics.totalCost)],
+            ['Gross Profit', formatAmount(metrics.grossProfit)],
+            ['Profit Margin', formatPercent(metrics.profitMargin)],
+            ['Operating Expenses', formatAmount(metrics.totalExpenses)],
+            ['Net Profit', formatAmount(metrics.netProfit)],
+            ['Bills with Missing Cost', String(metrics.missing)],
         ];
 
         autoTable(doc, {
@@ -251,10 +187,10 @@ const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => 
             body: productProfits.map(p => [
                 p.name,
                 p.quantity.toString(),
-                `₹${p.revenue.toFixed(0)}`,
-                `₹${p.cost.toFixed(0)}`,
-                `₹${p.profit.toFixed(0)}`,
-                `${p.margin.toFixed(1)}%`
+                formatAmount(p.revenue),
+                formatAmount(p.cost),
+                formatAmount(p.profit),
+                formatPercent(p.margin)
             ]),
             theme: 'grid',
             headStyles: { fillColor: [34, 197, 94] },
@@ -291,17 +227,18 @@ const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => 
             {/* Header */}
             <div className="h-16 px-4 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-3">
-                    <button onClick={onBack} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
+                    <button aria-label="Back" onClick={onBack} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
                         <ArrowLeft className="w-5 h-5 text-slate-600 dark:text-slate-300" />
                     </button>
                     <div>
                         <h2 className="font-bold text-lg text-slate-800 dark:text-white leading-none">Profit & Loss</h2>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Real-time P&L Analysis</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Net of sales returns, before GST</p>
                     </div>
                 </div>
 
                 <button
                     onClick={handleExportPDF}
+                    disabled={!validRange}
                     className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-full text-xs font-bold shadow-lg shadow-blue-500/30 active:scale-95 transition-transform"
                 >
                     <Share2 className="w-4 h-4" />
@@ -332,7 +269,7 @@ const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => 
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">From</label>
                             <div className="bg-slate-100 dark:bg-slate-800 rounded-xl px-3 py-2 flex items-center gap-2">
                                 <Calendar className="w-4 h-4 text-slate-500" />
-                                <input
+                                <input aria-label="From"
                                     type="date"
                                     value={fromDate}
                                     onChange={(e) => setFromDate(e.target.value)}
@@ -344,7 +281,7 @@ const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => 
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">To</label>
                             <div className="bg-slate-100 dark:bg-slate-800 rounded-xl px-3 py-2 flex items-center gap-2">
                                 <Calendar className="w-4 h-4 text-slate-500" />
-                                <input
+                                <input aria-label="To"
                                     type="date"
                                     value={toDate}
                                     onChange={(e) => setToDate(e.target.value)}
@@ -358,6 +295,10 @@ const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => 
 
             {/* Content */}
             <div className="flex-1 overflow-auto p-4 space-y-4">
+                {!validRange && <p role="status" className="text-sm text-amber-700 dark:text-amber-300">Choose a valid date range.</p>}
+                {metrics.missing > 0 && <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                    {metrics.missing} bills have items without a recorded purchase cost. Add their cost to calculate the period’s profit.
+                </p>}
                 {/* Summary Cards */}
                 <div className="grid grid-cols-2 gap-3">
                     <motion.div
@@ -382,7 +323,7 @@ const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => 
                             <TrendingUp className="w-4 h-4" />
                             <span className="text-[10px] font-bold uppercase tracking-wider">Gross Profit</span>
                         </div>
-                        <p className="text-xl font-black">₹{metrics.grossProfit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                        <p className="text-xl font-black">{formatAmount(metrics.grossProfit)}</p>
                     </motion.div>
 
                     <motion.div
@@ -395,20 +336,20 @@ const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => 
                             <Package className="w-4 h-4" />
                             <span className="text-[10px] font-bold uppercase tracking-wider">Cost</span>
                         </div>
-                        <p className="text-xl font-black">₹{metrics.totalCost.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+                        <p className="text-xl font-black">{formatAmount(metrics.totalCost)}</p>
                     </motion.div>
 
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.3 }}
-                        className={`bg-gradient-to-br ${metrics.profitMargin >= 20 ? 'from-green-500 to-green-600' : metrics.profitMargin >= 10 ? 'from-yellow-500 to-yellow-600' : 'from-red-500 to-red-600'} rounded-2xl p-4 text-white`}
+                        className={`bg-gradient-to-br ${metrics.profitMargin == null ? 'from-slate-500 to-slate-600' : metrics.profitMargin >= 20 ? 'from-green-500 to-green-600' : metrics.profitMargin >= 10 ? 'from-yellow-500 to-yellow-600' : 'from-red-500 to-red-600'} rounded-2xl p-4 text-white`}
                     >
                         <div className="flex items-center gap-2 mb-2 opacity-80">
                             <BarChart3 className="w-4 h-4" />
                             <span className="text-[10px] font-bold uppercase tracking-wider">Margin</span>
                         </div>
-                        <p className="text-xl font-black">{metrics.profitMargin.toFixed(1)}%</p>
+                        <p className="text-xl font-black">{formatPercent(metrics.profitMargin)}</p>
                     </motion.div>
                 </div>
 
@@ -420,8 +361,8 @@ const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => 
                     </div>
                     <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-100 dark:border-slate-800">
                         <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Net Profit</span>
-                        <p className={`text-lg font-black mt-1 ${metrics.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                            ₹{metrics.netProfit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        <p className={`text-lg font-black mt-1 ${metrics.netProfit == null ? 'text-slate-500' : metrics.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {formatAmount(metrics.netProfit)}
                         </p>
                     </div>
                 </div>
@@ -456,7 +397,7 @@ const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => 
                 <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-100 dark:border-slate-800">
                     <h3 className="text-sm font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
                         <PieChartIcon className="w-4 h-4 text-purple-500" />
-                        Profit Distribution
+                        Products with Positive Profit
                     </h3>
                     {profitDistribution.length > 0 ? (
                         <ResponsiveContainer width="100%" height={250}>
@@ -517,15 +458,15 @@ const ProfitLossDashboard: React.FC<ProfitLossDashboardProps> = ({ onBack }) => 
                                         <td className="p-3 text-xs font-medium text-slate-700 dark:text-slate-300">{p.name}</td>
                                         <td className="p-3 text-xs font-bold text-slate-600 dark:text-slate-400 text-right">{p.quantity}</td>
                                         <td className="p-3 text-xs font-bold text-blue-600 text-right">₹{p.revenue.toFixed(0)}</td>
-                                        <td className={`p-3 text-xs font-bold text-right ${p.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                            ₹{p.profit.toFixed(0)}
+                                        <td className={`p-3 text-xs font-bold text-right ${p.profit == null ? 'text-slate-500' : p.profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                            {formatAmount(p.profit)}
                                         </td>
                                         <td className="p-3 text-right">
-                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${p.margin >= 30 ? 'bg-emerald-100 text-emerald-700' :
+                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${p.margin == null ? 'bg-slate-100 text-slate-700' : p.margin >= 30 ? 'bg-emerald-100 text-emerald-700' :
                                                 p.margin >= 15 ? 'bg-yellow-100 text-yellow-700' :
                                                     'bg-red-100 text-red-700'
                                                 }`}>
-                                                {p.margin.toFixed(1)}%
+                                                {formatPercent(p.margin)}
                                             </span>
                                         </td>
                                     </tr>

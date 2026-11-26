@@ -1,655 +1,268 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-    ArrowLeft, TrendingUp, BookOpen, Package,
-    Scale, Users, PackageSearch, ShieldCheck,
-    Download, Calendar, BarChart3, FileText,
-    ShoppingCart, Share2, ChevronRight, AlertOctagon
-} from 'lucide-react';
-import { StorageService } from '../services/storageService';
+import { useState } from 'react';
+import { ArrowLeft, ArrowRight, BarChart3, BookOpen, Download, FileSpreadsheet, FileText, Package, ShieldCheck, Users } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
-import { formatDate } from '../utils/dateUtils';
+import * as XLSX from 'xlsx';
+import { StorageService } from '../services/storageService';
 import { addBrandedFooter } from '../services/pdfFooterUtils';
+import { buildBusinessReport, localDay, reportCreator, UNRECORDED } from '../services/businessReports';
+import type { ReportFilters, ReportSource } from '../services/businessReports';
+import { formatDate } from '../utils/dateUtils';
 import ProfitLossDashboard from './ProfitLossDashboard';
-import GSTReports from './GSTReports';
 import CustomerAnalytics from './CustomerAnalytics';
 
-interface ReportsProps {
-    onBack: () => void;
+type Filter = 'party' | 'item' | 'godown' | 'staff' | 'expiry' | 'status';
+type ReportLink = { id: string; name: string; filters?: Filter[]; snapshot?: boolean; json?: boolean; requiredFilter?: 'party' | 'item' };
+
+const groups: { label: string; icon: typeof Users; links: ReportLink[] }[] = [
+  { label: 'Transaction Reports', icon: BookOpen, links: [
+    { id: 'sales_summary', name: 'Sales Summary', filters: ['party', 'godown', 'status'] },
+    { id: 'daily_sales', name: 'Daily Sales Summary', filters: ['party', 'godown'] },
+    { id: 'purchase_report', name: 'Purchase Report', filters: ['party', 'status'] },
+    { id: 'daybook', name: 'Daybook', filters: ['party'] },
+    { id: 'expenses', name: 'Expense Category Report' },
+    { id: 'expense_transactions', name: 'Expense Transactions' },
+    { id: 'payment_register', name: 'Receipts & Payments', filters: ['party'] },
+  ] },
+  { label: 'Party Reports', icon: Users, links: [
+    { id: 'party_ledger', name: 'Party Statement (Ledger)', filters: ['party'], requiredFilter: 'party' },
+    { id: 'party_outstanding', name: 'Party-wise Outstanding', filters: ['party'], snapshot: true },
+    { id: 'party_aging', name: 'Receivable Aging', filters: ['party'], snapshot: true },
+    { id: 'inactive_parties', name: 'Inactive Parties', filters: ['party'] },
+    { id: 'party_item_sales', name: 'Party Report by Item', filters: ['item', 'party'], requiredFilter: 'item' },
+    { id: 'customer_analytics', name: 'Customer Analytics' },
+  ] },
+  { label: 'Item Reports', icon: Package, links: [
+    { id: 'item_sales', name: 'Items Sale Summary', filters: ['item', 'godown'] },
+    { id: 'hsn_sales', name: 'HSN-wise Sales Summary', filters: ['item'] },
+    { id: 'item_party_sales', name: 'Item Report by Party', filters: ['party', 'item'], requiredFilter: 'party' },
+    { id: 'stock_summary', name: 'Stock Summary', filters: ['item', 'godown'], snapshot: true },
+    { id: 'stock_detail', name: 'Stock Detail by Godown', filters: ['item', 'godown'], snapshot: true },
+    { id: 'stock_movement', name: 'Stock Movement', filters: ['item'] },
+    { id: 'low_stock', name: 'Low Stock Report', filters: ['item', 'godown'], snapshot: true },
+    { id: 'batch_expiry', name: 'Batch & Expiry Report', filters: ['item', 'expiry'], snapshot: true },
+    { id: 'rate_list', name: 'Rate List', filters: ['item'], snapshot: true },
+  ] },
+  { label: 'GST Reports', icon: ShieldCheck, links: [
+    { id: 'gstr1', name: 'GSTR-1 (Sales)', json: true },
+    { id: 'gstr2', name: 'GSTR-2 (Purchase / ITC)' },
+    { id: 'gstr3b', name: 'GSTR-3B Summary' },
+    { id: 'hsn_gst_sales', name: 'GST HSN-wise Sales Summary', filters: ['item'] },
+    { id: 'hsn_purchase', name: 'HSN-wise Purchase Summary', filters: ['item'] },
+  ] },
+  { label: 'TDS & TCS Reports', icon: FileSpreadsheet, links: [
+    { id: 'tds_payable', name: 'TDS Payable', filters: ['party'] },
+    { id: 'tds_receivable', name: 'TDS Receivable', filters: ['party'] },
+    { id: 'tcs_payable', name: 'TCS Payable', filters: ['party'] },
+    { id: 'tcs_receivable', name: 'TCS Receivable', filters: ['party'] },
+  ] },
+  { label: 'Staff Reports', icon: Users, links: [
+    { id: 'staff_sales', name: 'Sales Summary – Staff Wise', filters: ['staff'] },
+    { id: 'staff_daybook', name: 'Daybook – Staff Wise', filters: ['staff'] },
+  ] },
+  { label: 'Business Overview', icon: BarChart3, links: [
+    { id: 'profit_loss', name: 'Profit & Loss' },
+    { id: 'bill_profit', name: 'Bill-wise Profit', filters: ['party', 'godown'] },
+    { id: 'balance_sheet', name: 'Balance Sheet – Operating Balances', snapshot: true },
+  ] },
+];
+
+function startRange() {
+  const to = localDay();
+  return { from: to.slice(0, 8) + '01', to };
 }
 
-type ReportItem = {
-    id: string;
-    label: string;
-    sub?: string;
-    icon: any;
-    color: string;
-    bgColor: string;
-    type: 'DIRECT' | 'CATEGORY';
-    children?: ReportItem[];
-};
+function readReports(): ReportSource {
+  return {
+    sales: StorageService.getInvoices(), purchases: StorageService.getPurchases(),
+    debitNotes: StorageService.getVouchersByType('DEBIT_NOTE'), customers: StorageService.getCustomers(),
+    products: StorageService.getProducts(), payments: StorageService.getPayments(),
+    expenses: StorageService.getExpenses(), accounts: StorageService.getBankAccounts(),
+    godowns: StorageService.getGodowns(), stockMovements: StorageService.getStockMovements(),
+    staff: StorageService.getStaffMembers(), currentUserId: StorageService.getUserId(),
+  };
+}
 
-type ReportData = {
-    headers: string[];
-    rows: (string | number)[][];
-    summary?: { label: string; value: string | number }[];
-};
+const fields: Record<Filter, string> = { party: 'Party', item: 'Item', godown: 'Godown', staff: 'Staff', expiry: 'Expiry', status: 'Invoice status' };
+const number = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 3 });
+const panel = 'rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900';
+const input = 'min-w-0 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm dark:border-slate-700 dark:bg-slate-800';
+const presets = ['Today', 'Yesterday', 'Last 7 days', 'This month', 'Last month'] as const;
 
-const Reports: React.FC<ReportsProps> = ({ onBack }) => {
-    const [activeCategory, setActiveCategory] = useState<ReportItem | null>(null);
-    const [selectedReport, setSelectedReport] = useState<ReportItem | null>(null);
+function choosePeriod(preset: typeof presets[number]) {
+  const now = new Date();
+  const today = localDay(now);
+  const ago = (days: number) => localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - days));
+  if (preset === 'Today') return { from: today, to: today };
+  if (preset === 'Yesterday') return { from: ago(1), to: ago(1) };
+  if (preset === 'Last 7 days') return { from: ago(6), to: today };
+  if (preset === 'Last month') return { from: localDay(new Date(now.getFullYear(), now.getMonth() - 1, 1)), to: localDay(new Date(now.getFullYear(), now.getMonth(), 0)) };
+  return startRange();
+}
 
-    // Global Date State (Defaults to Current Month)
-    const [fromDate, setFromDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
-    const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
-
-    // Data State
-    const [reportData, setReportData] = useState<ReportData | null>(null);
-    const [loading, setLoading] = useState(false);
-
-    // ═══════════════════════════════════════════════════════════
-    // REPORT CONFIGURATION
-    // ═══════════════════════════════════════════════════════════
-    const mainReports: ReportItem[] = [
-        { id: 'profit_loss', label: 'Profit/Loss Dashboard', sub: 'Real-time P&L Analysis', icon: TrendingUp, color: 'text-emerald-600', bgColor: 'bg-emerald-50', type: 'DIRECT' },
-        { id: 'customer_analytics', label: 'Customer Analytics', sub: 'Credit Risk & Behavior', icon: Users, color: 'text-purple-600', bgColor: 'bg-purple-50', type: 'DIRECT' },
-        { id: 'bill_profit', label: 'Bill wise profit', sub: 'Profit per invoice', icon: TrendingUp, color: 'text-blue-600', bgColor: 'bg-blue-50', type: 'DIRECT' },
-        { id: 'sales_summary', label: 'Sales Summary', sub: 'Total sales & tax', icon: BarChart3, color: 'text-indigo-600', bgColor: 'bg-indigo-50', type: 'DIRECT' },
-        { id: 'daybook', label: 'Daybook', sub: 'Daily transaction log', icon: BookOpen, color: 'text-violet-600', bgColor: 'bg-violet-50', type: 'DIRECT' },
-        { id: 'stock_summary', label: 'Stock Summary', sub: 'Inventory status', icon: Package, color: 'text-pink-600', bgColor: 'bg-pink-50', type: 'DIRECT' },
-        { id: 'balance_sheet', label: 'Balance Sheet', sub: 'Assets & Liabilities', icon: Scale, color: 'text-emerald-600', bgColor: 'bg-emerald-50', type: 'DIRECT' },
-    ];
-
-    const categoryReports: ReportItem[] = [
-        {
-            id: 'cat_party', label: 'Party Reports', sub: 'Outstanding, Aging, Ledger, etc.', icon: Users, color: 'text-orange-600', bgColor: 'bg-orange-50', type: 'CATEGORY',
-            children: [
-                { id: 'party_outstanding', label: 'Party Wise Outstanding', sub: 'Who owes you money', icon: AlertOctagon, color: 'text-red-600', bgColor: 'bg-red-50', type: 'DIRECT' },
-                { id: 'party_aging', label: 'Receivable Aging (0-90d+)', sub: 'Overdue aging buckets', icon: Calendar, color: 'text-amber-600', bgColor: 'bg-amber-50', type: 'DIRECT' },
-                { id: 'inactive_parties', label: 'Inactive Parties', sub: 'No recent transactions', icon: Users, color: 'text-slate-500', bgColor: 'bg-slate-100', type: 'DIRECT' },
-            ]
-        },
-        {
-            id: 'cat_item', label: 'Item/Stock Reports', sub: 'Profit, Low Stock, Expiry, etc.', icon: PackageSearch, color: 'text-teal-600', bgColor: 'bg-teal-50', type: 'CATEGORY',
-            children: [
-                { id: 'item_sales', label: 'Item Wise Sales', sub: 'Most sold items', icon: ShoppingCart, color: 'text-blue-600', bgColor: 'bg-blue-50', type: 'DIRECT' },
-                { id: 'item_party_sales', label: 'Item Sales by Party', sub: 'Party-wise item breakdown', icon: Users, color: 'text-indigo-600', bgColor: 'bg-indigo-50', type: 'DIRECT' },
-                { id: 'low_stock', label: 'Low Stock Report', sub: 'Reorder alerts', icon: AlertOctagon, color: 'text-red-500', bgColor: 'bg-red-50', type: 'DIRECT' },
-                { id: 'batch_expiry', label: 'Batch & Expiry Report', sub: 'Expiring / expired stock batches', icon: Package, color: 'text-amber-600', bgColor: 'bg-amber-50', type: 'DIRECT' },
-            ]
-        },
-        {
-            id: 'cat_gst', label: 'GST Reports', sub: 'GSTR-1, 3B, Tax Summary', icon: ShieldCheck, color: 'text-indigo-600', bgColor: 'bg-indigo-50', type: 'CATEGORY',
-            children: [
-                { id: 'gstr1', label: 'GSTR-1 (Sales)', sub: 'B2B & B2C invoices', icon: FileText, color: 'text-indigo-600', bgColor: 'bg-indigo-50', type: 'DIRECT' },
-            ]
-        },
-    ];
-
-    // ═══════════════════════════════════════════════════════════
-    // DATA GENERATION ENGINE
-    // ═══════════════════════════════════════════════════════════
-    useEffect(() => {
-        if (selectedReport) {
-            setLoading(true);
-            setTimeout(() => { // Simulate calc delay for UI feedback
-                const data = generateReportData(selectedReport.id);
-                setReportData(data);
-                setLoading(false);
-            }, 300);
-        }
-    }, [selectedReport, fromDate, toDate]);
-
-    const generateReportData = (reportId: string): ReportData => {
-        const invoices = StorageService.getInvoices();
-        const customers = StorageService.getCustomers();
-        const products = StorageService.getProducts();
-
-        // Filter invoices by date
-        const filteredInvoices = invoices.filter(inv => inv.date >= fromDate && inv.date <= toDate);
-
-        switch (reportId) {
-            case 'bill_profit': {
-                let totalBillProfit = 0;
-                const billRows = filteredInvoices.filter(i => i.type !== 'CREDIT_NOTE').map(inv => {
-                    const cost = inv.items.reduce((s, item) => {
-                        const prod = products.find(p => p.id === item.productId);
-                        const unitCost = prod?.purchasePrice ?? (item.rate * 0.7);
-                        return s + (unitCost * item.quantity);
-                    }, 0);
-                    const profit = inv.total - cost;
-                    totalBillProfit += profit;
-                    return [
-                        formatDate(inv.date), inv.invoiceNumber, inv.customerName,
-                        inv.total.toFixed(2), cost.toFixed(2), profit.toFixed(2)
-                    ];
-                });
-                return {
-                    headers: ['Date', 'Bill No', 'Customer', 'Sale Amt', 'COGS', 'Profit'],
-                    rows: billRows,
-                    summary: [{ label: 'Total Profit', value: `₹${totalBillProfit.toFixed(2)}` }]
-                };
-            }
-
-            case 'sales_summary':
-                return {
-                    headers: ['Date', 'Bill No', 'Customer', 'Taxable', 'Tax', 'Total'],
-                    rows: filteredInvoices.map(inv => [
-                        formatDate(inv.date), inv.invoiceNumber, inv.customerName,
-                        inv.subtotal.toFixed(2),
-                        ((inv.totalCgst || 0) + (inv.totalSgst || 0) + (inv.totalIgst || 0)).toFixed(2),
-                        inv.total.toFixed(2)
-                    ]),
-                    summary: [{ label: 'Total Sales', value: `₹${filteredInvoices.reduce((s, i) => s + i.total, 0).toFixed(2)}` }]
-                };
-
-            case 'daybook':
-                // Combine Payments and Invoices
-                const payments = StorageService.getPayments().filter(p => p.date >= fromDate && p.date <= toDate);
-                const daybookEntries = [
-                    ...filteredInvoices.map(i => ({ date: i.date, desc: `Sale - ${i.customerName}`, in: i.total, out: 0, type: 'SALE' })),
-                    ...payments.map(p => {
-                        const isOut = p.type === 'PAID';
-                        return {
-                            date: p.date,
-                            desc: `${isOut ? 'Payment Out' : 'Payment In'} - ${customers.find(c => c.id === p.customerId)?.company || customers.find(c => c.id === p.customerId)?.name || 'Unknown'}`,
-                            in: isOut ? 0 : p.amount,
-                            out: isOut ? p.amount : 0,
-                            type: isOut ? 'PAYMENT' : 'RECEIPT'
-                        };
-                    })
-                ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-                return {
-                    headers: ['Date', 'Particulars', 'Amount In', 'Amount Out'],
-                    rows: daybookEntries.map(e => [formatDate(e.date), e.desc, e.in || '-', e.out || '-']),
-                    summary: [
-                        { label: 'Total In', value: `₹${daybookEntries.reduce((s, e) => s + e.in, 0)}` },
-                        { label: 'Total Out', value: `₹${daybookEntries.reduce((s, e) => s + e.out, 0)}` }
-                    ]
-                };
-
-            case 'party_outstanding':
-                const outstandingDefaults = customers.filter(c => c.balance > 0);
-                return {
-                    headers: ['Party Name', 'Phone', 'Balance'],
-                    rows: outstandingDefaults.map(c => [c.name, c.phone, c.balance.toFixed(2)]),
-                    summary: [{ label: 'Total Receivable', value: `₹${outstandingDefaults.reduce((s, c) => s + c.balance, 0).toFixed(2)}` }]
-                };
-
-            case 'stock_summary':
-                return {
-                    headers: ['Item Name', 'Category', 'Stock Qty', 'Value'],
-                    rows: products.map(p => [p.name || 'N/A', p.category || '-', p.stock, (p.stock * p.price).toFixed(2)]),
-                    summary: [{ label: 'Total Stock Value', value: `₹${products.reduce((s, p) => s + (p.stock * p.price), 0).toFixed(2)}` }]
-                };
-
-            case 'low_stock': {
-                const lowStockItems = products.filter(p => !p.isArchived && p.category !== 'Services' && (p.stock || 0) <= (p.lowStockThreshold ?? 10));
-                return {
-                    headers: ['Item Name', 'Stock Qty', 'Reorder Level'],
-                    rows: lowStockItems.map(p => [p.name, p.stock, p.lowStockThreshold ?? 10]),
-                    summary: [{ label: 'Items to Order', value: lowStockItems.length }]
-                };
-            }
-
-            case 'balance_sheet': {
-                const totalReceivable = customers.reduce((s, c) => s + (c.balance > 0 ? c.balance : 0), 0);
-                const totalPayable = customers.reduce((s, c) => s + (c.balance < 0 ? Math.abs(c.balance) : 0), 0);
-                const stockVal = products.filter(p => !p.isArchived).reduce((s, p) => s + ((p.stock || 0) * (p.purchasePrice || p.price || 0)), 0);
-                const accounts = StorageService.ensureDefaultAccounts();
-                const cashBankBal = accounts.reduce((s, a) => s + (a.balance || 0), 0);
-                const totalAssets = cashBankBal + totalReceivable + stockVal;
-                return {
-                    headers: ['Asset / Liability', 'Amount'],
-                    rows: [
-                        ['Cash & Bank Balances', `₹${cashBankBal.toFixed(2)}`],
-                        ['Total Receivables (Debtors)', `₹${totalReceivable.toFixed(2)}`],
-                        ['Inventory Value (at Purchase Cost)', `₹${stockVal.toFixed(2)}`],
-                        ['Total Payables (Creditors)', `-₹${totalPayable.toFixed(2)}`],
-                        ['Net Working Capital', `₹${(totalAssets - totalPayable).toFixed(2)}`]
-                    ],
-                    summary: [{ label: 'Total Assets', value: `₹${totalAssets.toFixed(2)}` }]
-                };
-            }
-
-            case 'party_aging': {
-                const todayMs = Date.now();
-                const agingRows = customers.filter(c => c.balance > 0).map(c => {
-                    const unpaid = invoices.filter(i => i.customerId === c.id && i.status !== 'PAID' && i.type !== 'CREDIT_NOTE');
-                    let b0_30 = 0, b31_60 = 0, b61_90 = 0, b90Plus = 0;
-                    unpaid.forEach(i => {
-                        const due = Number(i.balanceDue ?? (i.total - Number(i.paidAmount ?? i.amountReceived ?? 0)));
-                        const days = Math.max(0, Math.floor((todayMs - new Date(i.dueDate || i.date).getTime()) / 86400000));
-                        if (days <= 30) b0_30 += due;
-                        else if (days <= 60) b31_60 += due;
-                        else if (days <= 90) b61_90 += due;
-                        else b90Plus += due;
-                    });
-                    if (unpaid.length === 0) b0_30 = c.balance;
-                    return [c.company || c.name, b0_30.toFixed(0), b31_60.toFixed(0), b61_90.toFixed(0), b90Plus.toFixed(0), c.balance.toFixed(0)];
-                });
-                return {
-                    headers: ['Party', '0-30d', '31-60d', '61-90d', '90d+', 'Total Due'],
-                    rows: agingRows,
-                    summary: [{ label: 'Total Receivable', value: `₹${customers.filter(c => c.balance > 0).reduce((s, c) => s + c.balance, 0).toFixed(2)}` }]
-                };
-            }
-
-            case 'batch_expiry': {
-                const todayIso = new Date().toISOString().split('T')[0];
-                const batchRows: (string | number)[][] = [];
-                products.forEach(p => {
-                    (p.batches || []).forEach(b => {
-                        const status = !b.expiryDate ? 'No Expiry' : b.expiryDate < todayIso ? 'EXPIRED' : 'Active';
-                        batchRows.push([p.name, b.batchNo, b.expiryDate || '-', b.stock, status]);
-                    });
-                });
-                return {
-                    headers: ['Product', 'Batch No', 'Expiry Date', 'Stock', 'Status'],
-                    rows: batchRows,
-                    summary: [{ label: 'Total Batches', value: batchRows.length }]
-                };
-            }
-
-            case 'item_party_sales': {
-                const pairMap: Record<string, { item: string; party: string; qty: number; total: number }> = {};
-                filteredInvoices.filter(i => i.type !== 'CREDIT_NOTE').forEach(inv => {
-                    inv.items.forEach(it => {
-                        const k = `${it.productId}_${inv.customerId}`;
-                        if (!pairMap[k]) pairMap[k] = { item: it.description, party: inv.customerName, qty: 0, total: 0 };
-                        pairMap[k].qty += it.quantity;
-                        pairMap[k].total += Number(it.totalAmount ?? it.rate * it.quantity);
-                    });
-                });
-                const rows = Object.values(pairMap).sort((a, b) => b.total - a.total);
-                return {
-                    headers: ['Item', 'Party', 'Qty', 'Total'],
-                    rows: rows.map(r => [r.item, r.party, r.qty, r.total.toFixed(2)]),
-                    summary: [{ label: 'Line Entries', value: rows.length }]
-                };
-            }
-
-            case 'inactive_parties':
-                const activeIds = new Set([
-                    ...filteredInvoices.map(i => i.customerId),
-                    ...StorageService.getPayments().filter(p => p.date >= fromDate && p.date <= toDate).map(p => p.customerId)
-                ]);
-                const inactive = customers.filter(c => !activeIds.has(c.id));
-                return {
-                    headers: ['Party Name', 'Phone', 'Closing Balance'],
-                    rows: inactive.map(c => [c.name, c.phone, c.balance.toFixed(2)]),
-                    summary: [{ label: 'Inactive Count', value: inactive.length }]
-                };
-
-            case 'item_sales':
-                const itemMap: Record<string, { qty: number, amt: number, name: string }> = {};
-                filteredInvoices.forEach(inv => {
-                    inv.items.forEach(item => {
-                        if (!itemMap[item.productId]) itemMap[item.productId] = { qty: 0, amt: 0, name: item.description };
-                        itemMap[item.productId].qty += item.quantity;
-                        itemMap[item.productId].amt += (item.totalAmount || (item.rate * item.quantity));
-                    });
-                });
-                const itemRows = Object.values(itemMap).sort((a, b) => b.qty - a.qty);
-                return {
-                    headers: ['Item Name', 'Qty Sold', 'Total Amount'],
-                    rows: itemRows.map(i => [i.name, i.qty, i.amt.toFixed(2)]),
-                    summary: [{ label: 'Total Items Sold', value: itemRows.reduce((s, i) => s + i.qty, 0) }]
-                };
-
-            case 'gstr1':
-                const gstInvoices = filteredInvoices.filter(i => i.gstEnabled);
-                return {
-                    headers: ['Date', 'Invoice No', 'GSTIN', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total'],
-                    rows: gstInvoices.map(i => [
-                        formatDate(i.date), i.invoiceNumber, i.customerGstin || 'URD',
-                        (i.subtotal || 0).toFixed(2),
-                        (i.totalCgst || 0).toFixed(2),
-                        (i.totalSgst || 0).toFixed(2),
-                        (i.totalIgst || 0).toFixed(2),
-                        (i.total || 0).toFixed(2)
-                    ]),
-                    summary: [
-                        { label: 'Total Tax', value: `₹${gstInvoices.reduce((s, i) => s + (i.totalCgst || 0) + (i.totalSgst || 0) + (i.totalIgst || 0), 0).toFixed(2)}` }
-                    ]
-                };
-
-            default:
-                return { headers: ['Message'], rows: [['Report logic not implemented yet for ' + reportId]] };
-        }
-    };
-
-    // ═══════════════════════════════════════════════════════════
-    // PDF GENERATION (Using Data from State)
-    // ═══════════════════════════════════════════════════════════
-    const handleDownloadPDF = async () => {
-        if (!selectedReport || !reportData) return;
-
-        const doc = new jsPDF();
-        const company = StorageService.getCompanyProfile();
-
-        // 1. Header
-        doc.setFontSize(22);
-        doc.setFont("helvetica", "bold");
-        doc.text(company.name, 105, 15, { align: "center" });
-
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "normal");
-        doc.text(company.address, 105, 22, { align: "center" });
-        doc.text(`${(company.email || '')} | ${(company.phone || '')}`, 105, 27, { align: "center" });
-
-        doc.line(10, 32, 200, 32);
-
-        // 2. Report Details
-        doc.setFontSize(14);
-        doc.setFont("helvetica", "bold");
-        doc.text(selectedReport.label.toUpperCase(), 14, 42);
-
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "normal");
-        doc.text(`Period: ${formatDate(fromDate)} to ${formatDate(toDate)}`, 14, 48);
-        doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 53);
-        doc.text(`App Powered by Lavneet ❤️`, 14, 58);
-
-        // 3. Table
-        autoTable(doc, {
-            startY: 60,
-            head: [reportData.headers],
-            body: reportData.rows,
-            theme: 'grid',
-            headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold' },
-            styles: { fontSize: 9, cellPadding: 3 },
-            alternateRowStyles: { fillColor: [245, 247, 250] },
-        });
-
-        // 4. Summary Footer (if any)
-        if (reportData.summary) {
-            let finalY = (doc as any).lastAutoTable.finalY + 10;
-            doc.setFontSize(11);
-            doc.setFont("helvetica", "bold");
-            reportData.summary.forEach((item) => {
-                doc.text(`${item.label}: ${item.value}`, 14, finalY);
-                finalY += 6;
-            });
-        }
-
-        // 5. BRANDED FOOTER WATERMARK
-        addBrandedFooter(doc, { showDisclaimer: true });
-
-        // 6. Save/Share Logic
-        const fileName = `${selectedReport.id}_${Date.now()}.pdf`;
-        if (Capacitor.isNativePlatform()) {
-            try {
-                const pdfBase64 = doc.output('datauristring').split(',')[1];
-                const savedFile = await Filesystem.writeFile({
-                    path: fileName,
-                    data: pdfBase64,
-                    directory: Directory.Cache
-                });
-                await Share.share({
-                    title: selectedReport.label,
-                    url: savedFile.uri,
-                    dialogTitle: 'Share Report'
-                });
-            } catch (e) {
-                console.error("Share failed", e);
-                alert("Failed to share PDF");
-            }
-        } else {
-            doc.save(fileName);
-        }
-    };
-
-    // ═══════════════════════════════════════════════════════════
-    // UI RENDERING
-    // ═══════════════════════════════════════════════════════════
-
-    // --- SPECIAL DASHBOARDS ---
-    if (selectedReport?.id === 'profit_loss') {
-        return <ProfitLossDashboard onBack={() => setSelectedReport(null)} />;
+function filterOptions(source: ReportSource, filter: Filter): [string, string][] {
+  if (filter === 'party') return source.customers.map(p => [p.id, p.company || p.name]);
+  if (filter === 'item') {
+    const items = new Map(source.products.map(p => [p.id, p.name]));
+    for (const voucher of [...source.sales, ...source.purchases, ...source.debitNotes]) {
+      for (const item of voucher.items) {
+        const key = item.productId || item.description;
+        if (key && !items.has(key)) items.set(key, item.description || key);
+      }
     }
+    return [...items];
+  }
+  if (filter === 'godown') return source.godowns.map(g => [g.id, g.name]);
+  if (filter === 'status') return [['PAID', 'Paid'], ['PENDING', 'Pending'], ['PARTIAL', 'Partial'], ['OVERDUE', 'Overdue']];
+  if (filter === 'expiry') return ['Expired', 'Next 30 Days', 'Active', 'No Expiry'].map(value => [value, value]);
+  const staff = new Map(source.staff.map(member => [member.id, member.name]));
+  const recorded = new Set([...source.sales, ...source.purchases, ...source.debitNotes, ...source.payments, ...source.expenses].map(reportCreator));
+  return [...recorded].map(id => [id, id === UNRECORDED ? 'Unassigned' : staff.get(id) || (id === source.currentUserId ? 'Signed-in user' : 'Other recorded user')]);
+}
 
-    if (selectedReport?.id === 'customer_analytics') {
-        return <CustomerAnalytics onBack={() => setSelectedReport(null)} />;
+function ReportHeader({ title, onBack, children }: { title: string; onBack: () => void; children?: React.ReactNode }) {
+  return <header className="sticky top-0 z-20 flex min-h-16 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-800 dark:bg-slate-900">
+    <div className="flex min-w-0 items-center gap-2">
+      <button type="button" aria-label="Back" onClick={onBack} className="rounded-full p-2 hover:bg-slate-100 dark:hover:bg-slate-800"><ArrowLeft size={19} /></button>
+      <h1 className="text-lg font-bold leading-tight">{title}</h1>
+    </div>
+    {children}
+  </header>;
+}
+
+function ReportPreview({ link, filters, setFilters, onBack }: {
+  link: ReportLink; filters: ReportFilters; setFilters: (filters: ReportFilters) => void; onBack: () => void;
+}) {
+  const source = readReports();
+  const today = localDay();
+  const invalidDate = !link.snapshot && (!filters.from || !filters.to || filters.from > filters.to);
+  const needsFilter = link.requiredFilter && !filters[link.requiredFilter];
+  const data = invalidDate || needsFilter ? null : buildBusinessReport(link.id, source, filters, today);
+  const period = link.snapshot ? `Current balances as of ${formatDate(today)}` : `${formatDate(filters.from)} to ${formatDate(filters.to)}`;
+  const selection = link.filters?.flatMap(field => {
+    if (!filters[field]) return [];
+    const label = filterOptions(source, field).find(([id]) => id === filters[field])?.[1];
+    return label ? [`${fields[field]}: ${label}`] : [];
+  }) ?? [];
+
+  function exportReport(kind: 'PDF' | 'Excel' | 'JSON') {
+    if (!data) return;
+    const company = StorageService.getCompanyProfile();
+    const name = `${link.id}_${link.snapshot ? today : filters.from + '_' + filters.to}`;
+    const context = [period, ...selection].join(' | ');
+    if (kind === 'JSON') {
+      const payload = {
+        report: link.id, purpose: 'bookkeeping', company: company.name, gstin: company.gstin || company.gst || '',
+        from: filters.from, to: filters.to, columns: data.headers, rows: data.rows, summary: data.summary,
+      };
+      const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${name}_bookkeeping.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return;
     }
-
-    if (selectedReport?.id === 'gst_reports' || selectedReport?.id === 'gstr1') {
-        return <GSTReports onBack={() => setSelectedReport(null)} />;
+    if (kind === 'Excel') {
+      const workbook = XLSX.utils.book_new();
+      const intro = [[company.name], [link.name], [context], ...(data.note ? [[data.note]] : []), [], data.headers];
+      const worksheet = XLSX.utils.aoa_to_sheet([...intro, ...data.rows, [], ...(data.summary || []).map(item => [item.currency ? `${item.label} (INR)` : item.label, item.value])]);
+      worksheet['!cols'] = data.headers.map(header => ({ wch: Math.max(18, header.length + 4) }));
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Report');
+      XLSX.writeFile(workbook, `${name}.xlsx`);
+      return;
     }
+    const doc = new jsPDF({ orientation: data.headers.length > 6 ? 'landscape' : 'portrait' });
+    doc.setFontSize(17);
+    doc.text(company.name || 'JLS BillBook', 14, 18);
+    doc.setFontSize(13);
+    doc.text(link.name, 14, 27);
+    doc.setFontSize(9);
+    const contextLines = doc.splitTextToSize([context, data.note].filter(Boolean).join('\n'), doc.internal.pageSize.getWidth() - 28);
+    doc.text(contextLines, 14, 34);
+    const summary = (data.summary || []).map(item => [item.currency ? `${item.label} (INR)` : item.label, item.value]);
+    autoTable(doc, { startY: 39 + contextLines.length * 4, head: [data.headers], body: data.rows, theme: 'grid', styles: { fontSize: 8, overflow: 'linebreak' }, margin: { bottom: 24 } });
+    if (summary.length) {
+      autoTable(doc, { body: summary, theme: 'plain', styles: { fontStyle: 'bold' }, margin: { bottom: 24 }, pageBreak: 'avoid' });
+    }
+    addBrandedFooter(doc, { showDisclaimer: true });
+    doc.save(`${name}.pdf`);
+  }
 
-    // --- MODE 1: REPORT PREVIEW ---
-    if (selectedReport) {
-        return (
-            <div className="fixed inset-0 z-50 bg-slate-50 dark:bg-slate-950 flex flex-col h-full overflow-hidden">
-                {/* 1. Header with Download */}
-                <div className="h-16 px-4 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
-                    <div className="flex items-center gap-3">
-                        <button onClick={() => setSelectedReport(null)} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
-                            <ArrowLeft className="w-5 h-5 text-slate-600 dark:text-slate-300" />
-                        </button>
-                        <div>
-                            <h2 className="font-bold text-lg text-slate-800 dark:text-white leading-none">{selectedReport.label}</h2>
-                            <p className="text-[10px] text-slate-400 mt-0.5">Preview Mode</p>
-                        </div>
-                    </div>
-
-                    <button
-                        onClick={handleDownloadPDF}
-                        className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-full text-xs font-bold shadow-lg shadow-blue-500/30 active:scale-95 transition-transform"
-                    >
-                        <Share2 className="w-4 h-4" />
-                        Download
-                    </button>
-                </div>
-
-                {/* 2. Sticky Date Filter */}
-                <div className="p-4 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 shadow-sm shrink-0 flex items-center gap-4">
-                    <div className="flex-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">From</label>
-                        <div className="bg-slate-100 dark:bg-slate-800 rounded-xl px-3 py-2 flex items-center gap-2">
-                            <Calendar className="w-4 h-4 text-slate-500" />
-                            <input
-                                type="date"
-                                value={fromDate}
-                                onChange={(e) => setFromDate(e.target.value)}
-                                className="bg-transparent w-full text-xs font-bold outline-none text-slate-700 dark:text-slate-200"
-                            />
-                        </div>
-                    </div>
-                    <div className="flex-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">To</label>
-                        <div className="bg-slate-100 dark:bg-slate-800 rounded-xl px-3 py-2 flex items-center gap-2">
-                            <Calendar className="w-4 h-4 text-slate-500" />
-                            <input
-                                type="date"
-                                value={toDate}
-                                onChange={(e) => setToDate(e.target.value)}
-                                className="bg-transparent w-full text-xs font-bold outline-none text-slate-700 dark:text-slate-200"
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                {/* 3. Report Content (Scrollable Table) */}
-                <div className="flex-1 overflow-auto p-4 content-container">
-                    {loading ? (
-                        <div className="flex flex-col items-center justify-center h-40 space-y-3">
-                            <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                            <p className="text-xs font-bold text-slate-400">Loading Report Data...</p>
-                        </div>
-                    ) : reportData && reportData.rows.length > 0 ? (
-                        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
-                            {/* Summary Cards Row */}
-                            {reportData.summary && (
-                                <div className="flex flex-wrap gap-2 p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
-                                    {reportData.summary.map((item, idx) => (
-                                        <div key={idx} className="bg-white dark:bg-slate-800 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
-                                            <p className="text-[10px] text-slate-400 font-bold uppercase">{item.label}</p>
-                                            <p className="text-sm font-black text-slate-800 dark:text-white">{item.value}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* Detailed Table */}
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left border-collapse">
-                                    <thead>
-                                        <tr className="bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
-                                            {reportData.headers.map((h, i) => (
-                                                <th key={i} className="p-3 text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                                                    {h}
-                                                </th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                        {reportData.rows.map((row, rIdx) => (
-                                            <tr key={rIdx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                                                {row.map((cell, cIdx) => (
-                                                    <td key={cIdx} className="p-3 text-xs font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                                                        {cell}
-                                                    </td>
-                                                ))}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="flex flex-col items-center justify-center h-60 text-center">
-                            <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
-                                <FileText className="w-8 h-8 text-slate-300" />
-                            </div>
-                            <h3 className="text-sm font-bold text-slate-600 dark:text-slate-300">No Data Found</h3>
-                            <p className="text-xs text-slate-400 mt-1">Try changing the date range</p>
-                        </div>
-                    )}
-                </div>
+  return <div className="fixed inset-0 z-50 flex h-[100dvh] flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <ReportHeader title={link.name} onBack={onBack}>
+      <div className="flex gap-2">
+        {link.json && <button type="button" disabled={!data?.rows.length} onClick={() => exportReport('JSON')} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold disabled:opacity-40 dark:border-slate-700">JSON data</button>}
+        <button type="button" disabled={!data?.rows.length} onClick={() => exportReport('Excel')} className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold disabled:opacity-40 dark:border-slate-700"><FileSpreadsheet size={15} /> Excel</button>
+        <button type="button" disabled={!data?.rows.length} onClick={() => exportReport('PDF')} className="flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"><Download size={15} /> PDF</button>
+      </div>
+    </ReportHeader>
+    <div className="min-h-0 flex-1 overflow-auto p-4">
+      <div className="mx-auto max-w-6xl space-y-4">
+        <div className={`${panel} flex flex-wrap gap-3 p-3`}>
+          {link.snapshot ? <p className="basis-full text-xs text-slate-500 dark:text-slate-400">{period}</p> : <>
+            <div role="group" aria-label="Date presets" className="flex basis-full flex-wrap gap-2">
+              {presets.map(preset => <button type="button" key={preset} className="rounded-full border px-3 py-1 text-xs dark:border-slate-700" onClick={() => setFilters({ ...filters, ...choosePeriod(preset) })}>{preset}</button>)}
             </div>
-        );
-    }
-
-    // --- MODE 2: MAIN GRID (Default) ---
-    return (
-        <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950">
-            {/* Header */}
-            <div className="h-16 px-4 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 sticky top-0 z-20">
-                <div className="flex items-center gap-3">
-                    <button onClick={onBack} className="p-2 -ml-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
-                        <ArrowLeft className="w-5 h-5 text-slate-600 dark:text-slate-300" />
-                    </button>
-                    <span className="font-black text-lg text-slate-800 dark:text-white uppercase tracking-tight">Reports Central</span>
-                </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 pb-24">
-                {/* 1. Category Tabs / Grid */}
-                <AnimatePresence>
-                    {!activeCategory && (
-                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
-
-                            {/* Popular Section */}
-                            <div>
-                                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-3 ml-1">Popular Reports</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                    {mainReports.map((report) => (
-                                        <motion.button
-                                            key={report.id}
-                                            whileTap={{ scale: 0.98 }}
-                                            onClick={() => setSelectedReport(report)}
-                                            className="flex items-center gap-4 p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all text-left group"
-                                        >
-                                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${report.bgColor} group-hover:scale-110 transition-transform`}>
-                                                <report.icon className={`w-6 h-6 ${report.color}`} />
-                                            </div>
-                                            <div className="flex-1">
-                                                <h4 className="font-bold text-sm text-slate-800 dark:text-white">{report.label}</h4>
-                                                <p className="text-[10px] font-medium text-slate-400 mt-0.5 uppercase tracking-wide">{report.sub}</p>
-                                            </div>
-                                            <Download className="w-4 h-4 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                        </motion.button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Categories */}
-                            <div>
-                                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-3 ml-1">More Categories</h3>
-                                <div className="grid grid-cols-1 gap-3">
-                                    {categoryReports.map((cat) => (
-                                        <motion.button
-                                            key={cat.id}
-                                            whileTap={{ scale: 0.98 }}
-                                            onClick={() => setActiveCategory(cat)}
-                                            className="flex items-center gap-4 p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-all text-left"
-                                        >
-                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${cat.bgColor}`}>
-                                                <cat.icon className={`w-5 h-5 ${cat.color}`} />
-                                            </div>
-                                            <div className="flex-1">
-                                                <h4 className="font-bold text-sm text-slate-800 dark:text-white">{cat.label}</h4>
-                                                <p className="text-[10px] font-medium text-slate-400">{cat.sub}</p>
-                                            </div>
-                                            <ChevronRight className="w-5 h-5 text-slate-300" />
-                                        </motion.button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="mt-12 mb-8 text-center opacity-30">
-                                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">
-                                    Report Engine by Lavneet ❤️
-                                </p>
-                            </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-
-                {/* 2. Sub-Category View */}
-                <AnimatePresence>
-                    {activeCategory && (
-                        <motion.div
-                            initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-                            className="fixed inset-0 z-30 bg-slate-50 dark:bg-slate-950 flex flex-col"
-                        >
-                            <div className="h-16 px-4 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3 shrink-0">
-                                <button onClick={() => setActiveCategory(null)} className="p-2 -ml-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
-                                    <ArrowLeft className="w-5 h-5 text-slate-600 dark:text-slate-300" />
-                                </button>
-                                <span className="font-black text-lg text-slate-800 dark:text-white">{activeCategory.label}</span>
-                            </div>
-
-                            <div className="p-4 space-y-3 overflow-y-auto">
-                                {activeCategory.children?.map((report) => (
-                                    <motion.button
-                                        key={report.id}
-                                        whileTap={{ scale: 0.98 }}
-                                        onClick={() => setSelectedReport(report)}
-                                        className="w-full flex items-center gap-4 p-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm text-left"
-                                    >
-                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${report.bgColor}`}>
-                                            <report.icon className={`w-5 h-5 ${report.color}`} />
-                                        </div>
-                                        <div>
-                                            <h4 className="font-bold text-sm text-slate-800 dark:text-white">{report.label}</h4>
-                                            <p className="text-[10px] text-slate-400">{report.sub}</p>
-                                        </div>
-                                    </motion.button>
-                                ))}
-                            </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-            </div>
+            <label className="grow basis-32 text-xs font-medium">From<input type="date" className={input} value={filters.from} onChange={e => setFilters({ ...filters, from: e.target.value })} /></label>
+            <label className="grow basis-32 text-xs font-medium">To<input type="date" className={input} value={filters.to} onChange={e => setFilters({ ...filters, to: e.target.value })} /></label>
+          </>}
+          {link.filters?.map(field => <label key={field} className="grow basis-32 text-xs font-medium">{fields[field]}
+            <select className={input} value={filters[field] || ''} onChange={e => setFilters({ ...filters, [field]: e.target.value })}>
+              <option value="">{link.requiredFilter === field ? (field === 'item' ? 'Select an item' : 'Select a party') : 'All'}</option>
+              {filterOptions(source, field).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          </label>)}
         </div>
-    );
-};
+        {data?.note && <p className="text-sm text-slate-600 dark:text-slate-300">{data.note}</p>}
+        {!!data?.summary?.length && <dl className="grid grid-cols-[repeat(auto-fit,minmax(145px,1fr))] gap-2">
+          {data.summary.map(item => <div key={item.label} className={`${panel} p-3`}><dt className="text-xs text-slate-500 dark:text-slate-400">{item.label}</dt><dd className="font-semibold tabular-nums">{item.currency ? '₹' : ''}{typeof item.value === 'number' ? number.format(item.value) : item.value}</dd></div>)}
+        </dl>}
+        {data?.rows.length ? <div className={`${panel} overflow-x-auto`}>
+          <table className="w-full border-collapse text-left text-sm">
+            <thead className="bg-slate-100 dark:bg-slate-800"><tr>{data.headers.map(header => <th key={header} scope="col" className="whitespace-nowrap px-3 py-2.5 text-xs font-semibold">{header}</th>)}</tr></thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {data.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, index) => <td key={index} className="whitespace-nowrap px-3 py-2 tabular-nums">{typeof cell === 'number' ? number.format(cell) : cell}</td>)}</tr>)}
+            </tbody>
+          </table>
+        </div> : <div role="status" className={`${panel} grid justify-items-center gap-2 px-4 py-12 text-center text-sm text-slate-500 dark:text-slate-400`}>
+          <FileText size={24} />
+          {invalidDate ? 'Choose a valid date range.' : needsFilter ? `Select ${link.requiredFilter === 'item' ? 'an item' : 'a party'} to view the report.` : 'No records match these filters.'}
+        </div>}
+      </div>
+    </div>
+  </div>;
+}
 
-export default Reports;
+export default function Reports({ onBack }: { onBack: () => void }) {
+  const [selected, setSelected] = useState<ReportLink | null>(null);
+  const [filters, setFilters] = useState<ReportFilters>(startRange);
+  const [search, setSearch] = useState('');
+  const closeReport = () => setSelected(null);
+  if (selected?.id === 'profit_loss') return <ProfitLossDashboard onBack={closeReport} />;
+  if (selected?.id === 'customer_analytics') return <CustomerAnalytics onBack={closeReport} />;
+  if (selected) return <ReportPreview link={selected} filters={filters} setFilters={setFilters} onBack={closeReport} />;
+
+  const query = search.trim().toLowerCase();
+  const matching = groups.map(group => ({
+    ...group, links: group.links.filter(link => !query || `${group.label} ${link.name}`.toLowerCase().includes(query)),
+  })).filter(group => group.links.length);
+  return <div className="min-h-full bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <ReportHeader title="Reports" onBack={onBack} />
+    <div className="mx-auto max-w-6xl space-y-4 p-4 pb-24">
+      <input aria-label="Search reports" placeholder="Search reports" type="search" className={`${input} max-w-md`} value={search} onChange={e => setSearch(e.target.value)} />
+      <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {matching.map(group => <section key={group.label} className={panel}>
+          <h2 className="flex items-center gap-2 border-b border-slate-200 px-4 py-3.5 text-sm font-bold dark:border-slate-800"><group.icon size={18} className="text-blue-600 dark:text-blue-400" />{group.label}</h2>
+          {group.links.map(link => <button key={link.id} type="button" onClick={() => {
+            setFilters(({ from, to }) => ({ from, to }));
+            setSelected(link);
+          }} className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"><span>{link.name}</span><ArrowRight size={14} className="shrink-0 text-slate-400" /></button>)}
+        </section>)}
+      </div>
+      {!matching.length && <p role="status" className="text-sm text-slate-500">No reports match your search.</p>}
+    </div>
+  </div>;
+}
