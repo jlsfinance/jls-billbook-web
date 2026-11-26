@@ -120,6 +120,12 @@ function upcAlias(value: string) {
   return /^0\d{12}$/.test(value) ? value.slice(1) : '';
 }
 
+/** Give UPC-A and its zero-prefixed EAN-13 form the same camera identity. */
+export function barcodeIdentity(code: string) {
+  const value = code.toLowerCase();
+  return value.length === 13 ? upcAlias(value) || value : value;
+}
+
 /** Find the product linked to a barcode inside one business scope. */
 export const findProductByBarcode = (
   products: Product[],
@@ -128,15 +134,17 @@ export const findProductByBarcode = (
 ): Product | null => {
   const v = normalizeScannedBarcode(barcode);
   if (!v) return null;
-  const candidates = products.filter(
-    (p) =>
-      !!p.barcode &&
-      (opts.includeArchived ? true : !p.isArchived) &&
-      (opts.includeDisabled ? true : p.barcodeEnabled !== false)
-  );
-  const exact = candidates.find(product => barcodesMatch(product.barcode!, v));
+  const expected = v.toLowerCase();
   const alias = upcAlias(v);
-  return exact ?? (alias ? candidates.find(product => barcodesMatch(product.barcode!, alias)) : undefined) ?? null;
+  let aliasMatch: Product | null = null;
+  for (const product of products) {
+    if (!product.barcode || (!opts.includeArchived && product.isArchived) ||
+        (!opts.includeDisabled && product.barcodeEnabled === false)) continue;
+    const candidate = normalizeBarcode(product.barcode).toLowerCase();
+    if (candidate === expected) return product;
+    if (!aliasMatch && alias && candidate === alias) aliasMatch = product;
+  }
+  return aliasMatch;
 };
 
 /** Duplicate protection: same business cannot reuse a barcode on another product. */
@@ -160,8 +168,8 @@ export const lookupBarcode = (
 ): BarcodeLookupResult => {
   const normalized = normalizeScannedBarcode(barcode);
   const format = detectBarcodeFormat(normalized);
-  const anyMatch = findProductByBarcode(products, normalized, { ...opts, includeArchived: true, includeDisabled: true });
   const product = findProductByBarcode(products, normalized, opts);
+  const anyMatch = product ?? findProductByBarcode(products, normalized, { includeArchived: true, includeDisabled: true });
   return {
     found: !!product,
     product,

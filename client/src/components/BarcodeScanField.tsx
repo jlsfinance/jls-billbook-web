@@ -46,7 +46,7 @@ export default function BarcodeScanField({
   callback.current = onScan;
   const [value, setValue] = useState('');
   const [cameraOpen, setCameraOpen] = useState(false);
-  const activeCamera = useRef(false);
+  const cameraSession = useRef(0);
   const [flash, setFlash] = useState(false);
   const [error, setError] = useState('');
   const [soundOn, setSoundOn] = useState(true);
@@ -60,7 +60,9 @@ export default function BarcodeScanField({
 
   function accept(code: string, source: BarcodeSource): ScanOutcome {
     const outcome = callback.current(code, source) ?? 'added';
-    if (soundOn) SoundService.playScan(outcome === 'added');
+    if (soundOn) {
+      try { SoundService.playScan(outcome === 'added'); } catch (problem) { console.warn('Barcode sound was unavailable', problem); }
+    }
     if (outcome === 'added') {
       setFlash(true);
       window.clearTimeout(flashTimer.current);
@@ -107,16 +109,19 @@ export default function BarcodeScanField({
   }
 
   function closeCamera(focusBarcode: boolean) {
-    activeCamera.current = false;
+    const session = ++cameraSession.current;
     setCameraOpen(false);
-    requestAnimationFrame(() => (focusBarcode ? inputRef.current : cameraButtonRef.current)?.focus());
+    requestAnimationFrame(() => {
+      if (session === cameraSession.current) (focusBarcode ? inputRef.current : cameraButtonRef.current)?.focus();
+    });
   }
 
   async function linkBarcode(code: string, productId: string): Promise<ScanOutcome> {
     const item = StorageService.getProducts().find(product => product.id === productId && !product.isArchived && !product.barcode);
     if (!item) throw new Error('Choose an active item without a barcode.');
+    const session = cameraSession.current;
     await StorageService.saveProductConfirmed({ ...item, barcode: code, barcodeEnabled: true }, true);
-    return activeCamera.current ? accept(code, 'CAMERA') : 'rejected';
+    return session === cameraSession.current ? accept(code, 'CAMERA') : 'rejected';
   }
 
   useEffect(() => {
@@ -151,7 +156,7 @@ export default function BarcodeScanField({
       {enableCamera && <button ref={cameraButtonRef} type="button" disabled={disabled} aria-label="Open camera scanner" onClick={() => {
         window.clearTimeout(idleTimer.current);
         if (soundOn) void SoundService.resume();
-        activeCamera.current = true;
+        cameraSession.current++;
         setCameraOpen(true);
       }} className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-50">
         <Camera size={18} /><span>{continuous ? 'Scan items' : 'Camera'}</span>

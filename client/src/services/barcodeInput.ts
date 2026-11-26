@@ -13,14 +13,26 @@ export function isScannerBurst(input: BarcodeBurst) {
   return input.characters >= 4 && input.characters === input.value.length;
 }
 
-export function createCameraScanGate(rearmMs = 450) {
-  const lastSeen = new Map<string, number>();
-  return (code: string, now: number) => {
-    for (const [seen, time] of lastSeen) {
-      if (now - time >= rearmMs) lastSeen.delete(seen);
+export function createCameraScanGate(rearmMs = 380) {
+  const locked = new Map<string, number | null>();
+  let previousFrameAt: number | undefined;
+
+  return (code: string | null, now: number) => {
+    // A stalled or backgrounded camera gives no evidence that a label moved away.
+    const interrupted = previousFrameAt !== undefined && now - previousFrameAt > 350;
+    previousFrameAt = now;
+
+    for (const [seen, missingSince] of locked) {
+      if (seen === code) continue;
+      const absenceStart = interrupted ? now : (missingSince ?? now);
+      if (now - absenceStart >= rearmMs) locked.delete(seen);
+      else locked.set(seen, absenceStart);
     }
-    const seenRecently = lastSeen.has(code);
-    lastSeen.set(code, now);
-    return !seenRecently;
+
+    if (!code) return false;
+    const missingSince = interrupted ? null : locked.get(code);
+    const accept = !locked.has(code) || (missingSince != null && now - missingSince >= rearmMs);
+    locked.set(code, null);
+    return accept;
   };
 }
